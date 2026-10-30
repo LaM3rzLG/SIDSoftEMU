@@ -7,3 +7,5 @@ SIDSoftEMU.asm
 SIDSoftEMU.bin
 SIDSoftEMU.sym
 SIDSoftEMU.dsk
+hang_minta/
+__pycache__/
