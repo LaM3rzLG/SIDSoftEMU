@@ -11,7 +11,13 @@ Mindig töltsd be: **tvc-trse** (Macen + **tvc-trse-mac**); PC-s eszközök: **t
 Testvérprojektek és minták: `../Ugh`, `../WaterPumpGame`.
 
 ## A projekt
-- Videoton TV-Computer (Z80, 3 MHz), TRSE/Rascal. (Még üres - a cél és a felépítés ide kerül.)
+- Videoton TV-Computer (Z80, 3 MHz), TRSE/Rascal. (A cél még nincs leírva.)
+- Alap (2026-10-31, emulátorban kipróbálva): `SIDSoftEMU.ras`, GE unit, **Graphics 4** (paletta: fekete, cián, piros,
+  sárga), memória **U0,U1,VID,SYS** (`GE::MEM_VID_ON` = $50). A ROM a $C000-on, a képernyő a $8000-on van, ezért
+  a program kódja és adata csak $0000-$7FFF lehet (most $19EF-$1CA3). `GE::Init` kikapcsolja a firmware IT-t;
+  ROM-hívás előtt `GE::EnableTVCITHandler()`.
+- Build: Mac `bash resources/build_mac.sh` (Cmd+Shift+B), Windows `resources\build.ps1`; lemezen: `load"SIDSOFT"`.
+  A váz az Ugh-ból jött (`tvc_units/`, `resources/kozos.ps1`, `make_dsk.ps1`, `.vscode/tasks.json`).
 
 ## Munkastílus
 Magyarul, tömören; a lemez az igazság; `.bak_<név>` minden változtatás előtt; kétértelmű kérésnél az értelmezést egy

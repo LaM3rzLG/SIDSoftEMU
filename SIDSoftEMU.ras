@@ -1,0 +1,39 @@
+program SIDSoftEMU;
+@use "TVC"
+@use "GE"
+
+/* SIDSoftEMU - TRSE alap (2026-10-31).
+   Graphics 4 (256x240, 4 szín a palettából), memória: U0, U1, VID, SYS (GE::MEM_VID_ON = $50).
+   FONTOS: a $C000-$FFFF lapon a ROM (SYS) van, a $8000-$BFFF lapon a képernyő -> a program kódja és adata
+   csak $0000-$7FFF-ig (U0+U1) lehet; a fordítás után a .sym-ben ellenőrizd a végcímet.
+   Mac: Cmd+Shift+B (resources/build_mac.sh); Windows: resources\build.ps1 */
+
+var
+	i	:	byte;
+
+begin
+	GE::SetGraphics(GE::GRAPHICS4);
+	GE::Init(GE::DIRECT_TO_SCREEN);	/* a firmware IT-kezelőt kikapcsolja; ROM-híváshoz: GE::EnableTVCITHandler() */
+	GE::SetMemory(GE::MEM_VID_ON);	/* U0, U1, VID, SYS */
+
+	/* a 4 palettaszín (Graphics 4: 0..3) */
+	GE::SetPalette(0, GE::PALETTE_BLACK);
+	GE::SetPalette(1, GE::PALETTE_CYAN);
+	GE::SetPalette(2, GE::PALETTE_RED);
+	GE::SetPalette(3, GE::PALETTE_YELLOW);
+	GE::SetBorder(GE::BORDER_BLACK);
+
+	GE::ClearScreen(GE::GR4_COLOR0);
+
+	/* próbakép: 4 függőleges sáv a 4 színnel (16 byte = 64 pixel széles mindegyik) */
+	GE::FillRect(0,  0, 16, 240, GE::GR4_COLOR0);
+	GE::FillRect(16, 0, 16, 240, GE::GR4_COLOR1);
+	GE::FillRect(32, 0, 16, 240, GE::GR4_COLOR2);
+	GE::FillRect(48, 0, 16, 240, GE::GR4_COLOR3);
+
+	while (true) do
+	begin
+		GE::WaitForSync();
+		/* ide jön a program főciklusa */
+	end;
+end.

@@ -1,0 +1,10 @@
+# sorvegek: a repoban LF; Windowson a CRLF-re mentett fajl nem latszik modositottnak
+* text=auto
+*.bin binary
+*.jpg binary
+*.png binary
+*.gif binary
+*.wav binary
+*.BIN binary
+*.dsk binary
+*.cas binary

@@ -1,0 +1,46 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "sane-trse",
+			"problemMatcher": [
+				"$sane-trse"
+			],
+			"group": "build",
+			"label": "SANE / TRSE: Build"
+		},
+		{
+			// Windows: forditas + SIDSoftEMU.dsk (resources\build.ps1) - ez az alapertelmezett (Ctrl+Shift+B)
+			"label": "Windows: Build + dsk",
+			"type": "shell",
+			"command": "powershell",
+			"args": ["-NoProfile", "-File", "resources\\build.ps1"],
+			"options": { "cwd": "${workspaceFolder}" },
+			"group": { "kind": "build", "isDefault": true },
+			"presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+			"problemMatcher": []
+		},
+		{
+			// MAC: konvertalas + forditas + SIDSoftEMU.dsk + EP128 emulator (resources/build_mac.sh).
+			// Macen a Cmd+Shift+B erre van kotve (felhasznaloi keybindings.json); Windowson nem hasznalt.
+			"label": "Mac: Build + EP emu",
+			"type": "shell",
+			"command": "bash",
+			"args": ["resources/build_mac.sh"],
+			"options": { "cwd": "${workspaceFolder}" },
+			"group": "build",
+			"presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+			"problemMatcher": []
+		},
+		{
+			"label": "Mac: Build (emulator nelkul)",
+			"type": "shell",
+			"command": "bash",
+			"args": ["resources/build_mac.sh", "--no-emu"],
+			"options": { "cwd": "${workspaceFolder}" },
+			"group": "build",
+			"presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+			"problemMatcher": []
+		}
+	]
+}
