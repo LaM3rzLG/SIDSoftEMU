@@ -47,7 +47,7 @@ begin
 		di
 		ld	hl,SidAdat
 		ld	de,$6000
-		ld	bc,$1740
+		ld	bc,end_incbin_SidAdat-SidAdat		;	pontosan a fajl hossza
 		ldir
 		;	a 3 res kezdetben: tabla, 0. lap = csend
 		ld	hl,V1SH
