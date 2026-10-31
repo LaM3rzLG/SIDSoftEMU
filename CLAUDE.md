@@ -49,7 +49,18 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   **Névrend (a felhasználó döntése):** a `SID` mappában BÁRMILYEN nevű .sid lehet (8.3); a kiszámolt párja
   **`SID_TVC\<NÉV>\<nn>.STC`** (.sid-enként almappa, aldalanként egy fájl). Repóban: `sid/LNINJA.SID`,
   `sid_tvc/LNINJA/03.STC` (a build mindkettőt a lemezre teszi; `make_dsk.ps1` tetszőleges mélységű mappát tud).
-  1. lépés KÉSZ (emu): a lejátszó a `SID_TVC\LNINJA\nn.STC`-ből tölt, programból is megy az elérési út. Menü -> ha van kiszámolt fájl, rögtön szól; ha nincs, a TVC kiszámolja (Z80-as 6502-emu,
+  1. lépés KÉSZ (emu): a lejátszó a `SID_TVC\LNINJA\nn.STC`-ből tölt, programból is megy az elérési út.
+  **2026-10-31: A TELJES ÚT MŰKÖDIK (freeTVC + ep128emu):** menü -> ha nincs .STC: `SID\LNINJA.SID` betöltés ->
+  6502-emu (`cpu6502.ras`, generált: `tools/gen_cpu6502.py`) + átalakító (`atalakito.ras`, generált:
+  `tools/gen_atalakito.py` <- `tools/atalakito_src.asm`) -> mentés `SID_TVC\LNINJA\nn.STC` -> lejátszás.
+  A TVC kimenete BÁJTRA egyezik a Python-referenciával (`tools/tvc_atalakito.py`); ellenőrzők: `tools/z80.py`,
+  `z80_cpu_teszt.py`, `z80_at_teszt.py`, `dsk_olvas.py`. Gyors teszt: freeTVC headless (`--disk A:x.dsk --autostart
+  x.dsk --key 5@1200 --frames 40000`, ~35 s), utána `tools/dsk_olvas.py`.
+  Mért: számolás ~1,5x a dal hossza (LN 5. aldal 14621 kép = ~7 perc); a dal a memória végéig (~4:50) megy, hurok
+  NINCS (elölről indul) - KÖVETKEZŐ: hurokkeresés, gyorsítás, 64K-s valódi gépen próba.
+  Tanulságok: ep128emu a lemezképet csak sávváltáskor / motor-leálláskor írja ki (mentés után azonnali lejátszásnál
+  a .dsk-ban 0 byte látszik - NEM hiba); TRSE: `t[17] := t[17] + 1` (byte-tömb, konstans index) nem működött;
+  `FajlTeszt.ras` (+ `resources/build_fajlteszt.sh`) = lemezművelet-próba. Menü -> ha van kiszámolt fájl, rögtön szól; ha nincs, a TVC kiszámolja (Z80-as 6502-emu,
   "Számolás... %"), lemezre menti, lejátssza. Csak a kiválasztott aldalt számolja. Lejátszás változatlan.
   Mért (Macen): LN egy aldala csak ~4 KB (az init a 4 KB-os blokkot $B000-ra másolja, a play csak $B000-$BA6D +
   nullás lap + $2000 ugrótábla), play átlag ~470 / max ~1400 6502-utasítás képkockánként -> becslés: számolás =

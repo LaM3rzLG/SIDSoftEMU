@@ -9,3 +9,8 @@ SIDSoftEMU.sym
 SIDSoftEMU.dsk
 hang_minta/
 __pycache__/
+
+FajlTeszt.asm
+FajlTeszt.bin
+FajlTeszt.sym
+FajlTeszt.dsk

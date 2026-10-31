@@ -5,7 +5,7 @@ begin
 ;	TVC-s atalakito: SID-irasok -> .STC (a tools/tvc_atalakito.py PONTOS masa; ellenorzes: tools/z80_at_teszt.py)
 ;	Hivasok (normal veremmel, $B0 lapozasban; IX, IY szabadon):
 ;	  AtInit      - kimenet ($5000-tol), hangok, hash-tablak ($EF00-$F4FF), sorok ($F500-$F7FF)
-;	  AtKepkocka  - egy kepkocka: a CpuLog (CpuLogN par) feldolgozasa, 3 hang: burkolo, allapot, kodolas.
+;	  AtKepkocka  - egy kepkocka (= AtK1 + AtK2): a CpuLog (CpuLogN par) feldolgozasa, 3 hang: burkolo, allapot, kodolas.
 ;	                AtStop = 1, ha mar nincs hely (a kepkocka nem kerult be)
 ;	  AtVege      - a sorok kiuritese, VEGE ($11 -> elso rekord), fejlec. Hossz: AtHossz
 ;	Hang-struktura (IX, 48 byte):
@@ -133,6 +133,27 @@ begin
 		dec	a
 		or	a
 		ret
+
+;	A lapjanak nullazasa (a blokk nem hasznalt vege is 0, mint a Pythonban); A, HL marad
+	AtLapTorol:
+		push	hl
+		ld	h,a
+		ld	l,0
+	AltK:
+		ld	(hl),0
+		inc	l
+		jp	nz,AltK
+		pop	hl
+		ret
+
+;	az elso 3 blokk ($5000-$52FF) nullazasa - a .sid kep eldobasa (tomorites) UTAN hivando!
+	AtTorol3:
+		ld	a,$50
+		call	AtLapTorol
+		inc	a
+		call	AtLapTorol
+		inc	a
+		jp	AtLapTorol
 	AbTele:
 		ld	a,1
 		ld	(AtTele),a
@@ -141,6 +162,14 @@ begin
 
 ;	------------------------------------------------ AtKepkocka
 	AtKepkocka:
+		call	AtK1
+		ld	a,(AtStop)
+		or	a
+		ret	nz
+		jp	AtK2
+
+;	AtK1: a kepkocka eleje - hely-ellenorzes, SID-naplo, 3 hang: burkolo + cel (TST). AtStop = 1: nincs hely
+	AtK1:
 		ld	a,(AtNext)
 		cp	$E4					;	3 KB tartalek (mint a Python: SONG_END - next < 3072)
 		jp	c,AkVan
@@ -191,6 +220,18 @@ begin
 		call	AtFel
 		call	AtAllapot
 		call	AtFel
+		ld	de,48
+		add	ix,de
+		pop	bc
+		djnz	AkH
+		ret
+
+;	AtK2: a kepkocka vege - a 3 cel (TST) a sorokba + kodolas
+	AtK2:
+		ld	ix,AtHangok
+		ld	b,3
+	AkK:
+		push	bc
 		call	AtQPush
 		xor	a
 		ld	(AtFinal),a
@@ -198,7 +239,7 @@ begin
 		ld	de,48
 		add	ix,de
 		pop	bc
-		djnz	AkH
+		djnz	AkK
 		ld	hl,(AtKepek)
 		inc	hl
 		ld	(AtKepek),hl
@@ -617,6 +658,7 @@ begin
 		call	AtBlokk
 		pop	bc
 		ret	c					;	nincs hely (a Python itt hibat dob)
+		call	AtLapTorol
 		ld	l,(ix+13)
 		ld	h,(ix+14)
 		ld	(hl),$11

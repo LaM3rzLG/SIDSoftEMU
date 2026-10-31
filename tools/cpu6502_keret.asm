@@ -44,6 +44,8 @@ CPU_ZERO	EQU	$FF
 		db	0
 	CpuPoolMin:
 		db	0
+	CpuPoolMax:
+		db	CPU_JTL
 	CpuImgLap:
 		db	0
 	CpuImg6502:
@@ -65,7 +67,7 @@ CPU_ZERO	EQU	$FF
 	CpuLogP:
 		dw	0
 	CpuLog:
-		ds	128
+		ds	256
 	CpuAux:
 		ds	16
 	CpuAuxTop:
@@ -340,7 +342,7 @@ CPU_ZERO	EQU	$FF
 		jr	nc,CssKesz
 		ld	e,a
 		ld	a,(CpuLogN)
-		cp	64
+		cp	128
 		jr	nc,CssKesz
 		inc	a
 		ld	(CpuLogN),a
@@ -367,8 +369,10 @@ CPU_ZERO	EQU	$FF
 		jr	nz,CssKesz
 	;	uj lap a 6502-lapnak (L), az utasitas ujra
 	CpuFoglal:
+		ld	a,(CpuPoolMax)
+		ld	d,a
 		ld	a,(CpuPool)			;	felfele foglal (a sorban irt lapok egymas utan kerulnek -> a kod atfolyhat)
-		cp	CPU_JTL
+		cp	d
 		jr	nc,CpuNincsHely
 		ld	h,CPU_PT
 		ld	(hl),a

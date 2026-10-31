@@ -17,9 +17,9 @@ program SIDSoftEMU;
 var
 	SidZaj		:	incbin("resources/sid_zaj.bin");		/* zaj-alak: 256 x 0..15 (a TablaGen-hez) */
 	Fajlnev		:	array[22] of byte = (21, $53, $49, $44, $5F, $54, $56, $43, $5C, $4C, $4E, $49, $4E, $4A, $41, $5C, $30, $33, $2E, $53, $54, $43);	/* "SID_TVC\LNINJA\03.STC" - az aldal a 16-17. byte */
-	IrasNev		:	array[24] of byte = (23, $53, $49, $44, $5F, $54, $56, $43, $5C, $4C, $4E, $49, $4E, $4A, $41, $5C, $49, $52, $41, $53, $2E, $53, $54, $43);	/* proba: "SID_TVC\\LNINJA\\IRAS.STC" */
 	Kod, Dal, Hiba	:	byte;
-	IrEredm		:	array[8] of byte;	/* iraspoba: A, F a $53 utan; BC a 2 iras utan; A, F a $54 utan */
+	AtHiba, AtFigy	:	byte;
+	/* atalakitas: hiba (0 jo, 1 6502, 2 tul sok lap), figyelmeztetes */
 	SidNev		:	array[15] of byte = (14, $53, $49, $44, $5C, $4C, $4E, $49, $4E, $4A, $41, $2E, $53, $49, $44);	/* "SID\\LNINJA.SID" */
 	SidFej		:	array[130] of byte;		/* a .sid fejlece (big-endian mezok) */
 	SidPuffer	:	array[1024] of byte;	/* betolteskor: darabok, innen masoljuk a helyukre ($B0 lapozassal) */
@@ -83,37 +83,6 @@ begin
 		ret
 	BtHossz:
 		dw	0
-	");
-end;
-
-/* ---------------------------------------------------------------- PROBA: fajliras (W gomb a menuben)
-   2 blokkiras: 2 byte (BtHossz) + 28672 byte a $5000-rol. Eredmeny az IrEredm-ben. */
-procedure IrasProba();
-begin
-	asm("
-		xor	a
-		ld	($0B6B),a			;	mint a TVC::CreateFile
-		ld	de,IrasNev
-		rst	$30
-		db	$53					;	CAS_CRTE
-		push	af
-		pop	hl
-		ld	(IrEredm),hl
-		ld	de,BtHossz
-		ld	bc,2
-		rst	$30
-		db	$52					;	CAS_BKOUT
-		ld	(IrEredm+2),bc
-		ld	de,$5000
-		ld	bc,$7000
-		rst	$30
-		db	$52
-		ld	(IrEredm+4),bc
-		rst	$30
-		db	$54					;	CAS_CLOSE (iras)
-		push	af
-		pop	hl
-		ld	(IrEredm+6),hl
 	");
 end;
 
@@ -218,17 +187,45 @@ SID_IMG	EQU	$50
 	");
 end;
 
-/* ---------------------------------------------------------------- 3. lepes, PROBA: 6502-emu a TVC-n (T gomb)
-   init (aldal 3) + 1500 x play. Kepkockankent a SID-irasok ellenorzoosszege (c = rotl16(c) xor (reg*256+ert))
-   a kepernyo-RAM-ba ($8000-tol, 2 byte; a 0. = az init). Keret sarga = szamol. Eredmeny: TesztN, CpuErr. */
-procedure CpuTeszt();
+/* ---------------------------------------------------------------- ATALAKITAS a TVC-n: .sid (SidBetolt utan) -> dal $5000-tol
+   1. CpuInit, AtInit, init(Dal-1). 2. Proba: 500 kepkocka $B0 lapozasban (a .sid kepe U1-U3), a celallapotok a
+   kepernyo-RAM-ba ($8000-, 12 byte/kepkocka). 3. Tomorites: csak a probaban erintett kep-lapok + a foglalt lapok
+   maradnak, a VID $98-$BB lapjaira (6502-lapok sorrendjeben; a $BC00-$BFFF a VT-DOS puffere, oda nem szabad irni). 4. A proba celjai a kodoloba (AtK2).
+   5. Fo ciklus: emulacio $90 (U0,U1,VID,U3), kodolas $B0, amig van hely (AtStop) vagy max. 30000 kepkocka.
+   6. AtVege. Eredmeny: AtHossz, AtHiba (0 jo, 1 = 6502-hiba, 2 = tul sok 6502-lap), AtFigy (1 = egy eldobott
+   lapot kesobb megis hasznalt -> pontatlan lehet). A kepernyo kozben fekete (paletta), a keret 5 mp-enkent villan. */
+procedure Atalakitas();
 begin
 	asm("
+ATA_PROBA	EQU	500
+ATA_VLAP	EQU	$98
+ATA_VVEG	EQU	$BC				;	a VID $BC00-$BFFF (nem latszo 1 KB) a VT-DOS-e: nem nyulunk hozza!
+ATA_MAX	EQU	30000
 		di
+		;	a ROM az IY-t, a rst $30 az AF'-t hasznalja: mentes (+ IX, BC', DE', HL')
+		ld	(AtaMIX),ix
+		ld	(AtaMIY),iy
+		exx
+		ld	(AtaMBC),bc
+		ld	(AtaMDE),de
+		ld	(AtaMHL),hl
+		exx
+		ex	af,af'
+		push	af
+		pop	hl
+		ld	(AtaMAF),hl
+		ex	af,af'
+		xor	a
+		ld	(AtHiba),a
+		ld	(AtFigy),a
+		xor	a
+		out	($00),a
+		out	($60),a
+		out	($61),a
+		out	($62),a
+		out	($63),a
 		ld	a,$B0
 		out	($02),a
-		ld	a,168
-		out	($00),a
 		ld	a,SID_IMG
 		ld	(CpuImgLap),a
 		ld	a,(SidLoad+1)
@@ -244,87 +241,416 @@ begin
 		ld	(CpuImgDb),a
 		add	a,SID_IMG
 		ld	(CpuPoolMin),a
+		ld	a,$EF				;	a probaban a foglalas a hash-tablak ala
+		ld	(CpuPoolMax),a
 		call	CpuInit
-		ld	hl,$8000
-		ld	(TesztP),hl
-		ld	hl,0
-		ld	(TesztN),hl
-		ld	a,(SidFej+10)		;	init
+		call	AtInit
+		call	AtaLogTorol
+		ld	a,(SidFej+10)		;	init (A = aldal - 1)
 		ld	(CpuCim+1),a
 		ld	a,(SidFej+11)
 		ld	(CpuCim),a
-		ld	a,2
+		ld	a,(Dal)
+		dec	a
 		ld	(CpuA),a
-		call	CtHiv
-	CtKor:
+		call	CpuHiv
 		ld	a,(CpuErr)
 		or	a
-		jr	nz,CtVege
-		ld	a,(SidFej+12)		;	play
+		jp	nz,AtaHiba6502
+		ld	hl,$FB00			;	erintett lapok: csak a play szamit
+		xor	a
+	AtaTT:
+		ld	(hl),a
+		inc	l
+		jr	nz,AtaTT
+		;	--- proba
+		ld	hl,$8000
+		ld	(AtaVP),hl
+		ld	hl,0
+		ld	(AtaN),hl
+	AtaProba:
+		call	AtaPlay
+		ld	a,(CpuErr)
+		or	a
+		jp	nz,AtaHiba6502
+		call	AtK1
+		call	AtaLogTorol
+		ld	hl,(AtaVP)
+		ld	a,$90
+		out	($02),a
+		ld	ix,AtHangok
+		ld	b,3
+	AtaPr1:
+		ld	a,(ix+27)			;	TST0, TST1, TSL, TPW (gen_atalakito MEZOK)
+		ld	(hl),a
+		inc	hl
+		ld	a,(ix+28)
+		ld	(hl),a
+		inc	hl
+		ld	a,(ix+29)
+		ld	(hl),a
+		inc	hl
+		ld	a,(ix+30)
+		ld	(hl),a
+		inc	hl
+		ld	de,48
+		add	ix,de
+		djnz	AtaPr1
+		ld	a,$B0
+		out	($02),a
+		ld	(AtaVP),hl
+		ld	hl,(AtaN)
+		inc	hl
+		ld	(AtaN),hl
+		ld	de,ATA_PROBA
+		or	a
+		sbc	hl,de
+		jr	nz,AtaProba
+		;	--- tomorites
+		call	AtaTomorit
+		ld	a,(AtHiba)
+		or	a
+		jp	nz,AtaKi
+		call	AtTorol3			;	a kimenet elso 3 blokkja (ott volt a .sid kep)
+		;	--- a proba celjai a kodoloba
+		ld	hl,$8000
+		ld	(AtaVP),hl
+		ld	hl,ATA_PROBA
+		ld	(AtaM),hl
+	AtaVissza:
+		ld	hl,(AtaVP)
+		ld	a,$90
+		out	($02),a
+		ld	de,AtaTmp
+		ld	bc,12
+		ldir
+		ld	a,$B0
+		out	($02),a
+		ld	(AtaVP),hl
+		ld	hl,AtaTmp
+		ld	ix,AtHangok
+		ld	b,3
+	AtaVi1:
+		ld	a,(hl)
+		ld	(ix+27),a
+		inc	hl
+		ld	a,(hl)
+		ld	(ix+28),a
+		inc	hl
+		ld	a,(hl)
+		ld	(ix+29),a
+		inc	hl
+		ld	a,(hl)
+		ld	(ix+30),a
+		inc	hl
+		ld	de,48
+		add	ix,de
+		djnz	AtaVi1
+		call	AtK2
+		ld	hl,(AtaM)
+		dec	hl
+		ld	(AtaM),hl
+		ld	a,h
+		or	l
+		jr	nz,AtaVissza
+		;	--- fo ciklus
+	AtaFo:
+		ld	a,$90
+		out	($02),a
+		call	AtaPlay
+		ld	a,$B0
+		out	($02),a
+		ld	a,(CpuErr)
+		or	a
+		jp	nz,AtaHiba6502
+		call	AtK1
+		ld	a,(AtStop)
+		or	a
+		jr	nz,AtaVeg
+		call	AtK2
+		call	AtaLogTorol
+		ld	hl,(AtaN)
+		inc	hl
+		ld	(AtaN),hl
+		ld	a,h					;	keret: 256 kepkockankent sarga / fekete
+		and	1
+		jr	z,AtaK0
+		ld	a,168
+	AtaK0:
+		out	($00),a
+		ld	de,ATA_MAX
+		or	a
+		sbc	hl,de
+		jp	nz,AtaFo
+	AtaVeg:
+		call	AtVege
+		;	eldobott, de kesobb hasznalt lap?
+		ld	hl,SidPuffer+256
+		ld	de,$FB00
+		ld	b,0
+	AtaFi:
+		ld	a,(de)
+		and	(hl)
+		jr	z,AtaFi1
+		ld	a,1
+		ld	(AtFigy),a
+	AtaFi1:
+		inc	hl
+		inc	e
+		djnz	AtaFi
+	AtaKi:
+		xor	a
+		out	($00),a
+		ld	a,($0003)
+		out	($02),a
+		ld	ix,(AtaMIX)
+		ld	iy,(AtaMIY)
+		exx
+		ld	bc,(AtaMBC)
+		ld	de,(AtaMDE)
+		ld	hl,(AtaMHL)
+		exx
+		ex	af,af'
+		ld	hl,(AtaMAF)
+		push	hl
+		pop	af
+		ex	af,af'
+		ei
+		ret
+	AtaHiba6502:
+		ld	a,1
+		ld	(AtHiba),a
+		jr	AtaKi
+
+	AtaPlay:
+		ld	a,(SidFej+12)
 		ld	(CpuCim+1),a
 		ld	a,(SidFej+13)
 		ld	(CpuCim),a
 		xor	a
 		ld	(CpuA),a
-		call	CtHiv
-		ld	hl,(TesztN)
-		inc	hl
-		ld	(TesztN),hl
-		ld	de,1500
-		or	a
-		sbc	hl,de
-		jr	nz,CtKor
-	CtVege:
-		xor	a
-		out	($00),a
-		ld	a,($0003)
-		out	($02),a
-		ei
-		ret
+		jp	CpuHiv
 
-	;	egy hivas + az ellenorzoosszeg a kepernyo-RAM-ba
-	CtHiv:
+	AtaLogTorol:
 		xor	a
 		ld	(CpuLogN),a
 		ld	hl,CpuLog
 		ld	(CpuLogP),hl
-		call	CpuHiv
-		ld	hl,0
-		ld	a,(CpuLogN)
-		or	a
-		jr	z,CtCsVeg
+		ret
+
+	;	tomorites: a 6502-lapok (laptabla $FA00) atrendezese a VID-be; eldobott lapok a SidPuffer+256 tablaban
+	AtaTomorit:
+		ld	a,ATA_VLAP
+		ld	(AtaDest),a
+		ld	hl,SidPuffer+256
+		ld	b,0
+		xor	a
+	TmD:
+		ld	(hl),a
+		inc	hl
+		djnz	TmD
+		ld	a,(CpuImgDb)
+		add	a,SID_IMG
+		ld	(AtaKepVeg),a
+		ld	c,0
+	TmKor:
+		ld	h,$FA
+		ld	l,c
+		ld	a,(hl)
+		cp	$FC					;	ZP, verem, I/O, ures: marad
+		jr	nc,TmTov
 		ld	b,a
-		ld	de,CpuLog
-	CtCs:
-		add	hl,hl
-		jr	nc,CtCs1
-		inc	l
-	CtCs1:
-		ld	a,(de)
-		xor	h
-		ld	h,a
-		inc	de
-		ld	a,(de)
-		xor	l
+		cp	SID_IMG
+		jr	c,TmTart
+		ld	hl,AtaKepVeg
+		cp	(hl)
+		jr	nc,TmTart			;	foglalt lap: marad
+		ld	h,$FB
+		ld	l,c
+		ld	a,(hl)
+		or	a
+		jr	nz,TmTart
+		ld	h,$FA				;	eldobjuk
+		ld	(hl),$FF
+		ld	hl,SidPuffer+256
+		ld	a,l
+		add	a,c
 		ld	l,a
-		inc	de
-		djnz	CtCs
-	CtCsVeg:
-		ex	de,hl
-		ld	hl,(TesztP)
-		ld	a,$90				;	U0,U1,VID,U3
+		jr	nc,TmD1
+		inc	h
+	TmD1:
+		ld	(hl),1
+		jr	TmTov
+	TmTart:
+		ld	a,(AtaDest)
+		cp	ATA_VVEG
+		jr	nc,TmTele
+		push	bc
+		ld	h,b
+		ld	l,0
+		ld	de,SidPuffer
+		ld	bc,256
+		ldir
+		ld	a,$90
 		out	($02),a
-		ld	(hl),e
-		inc	hl
-		ld	(hl),d
-		inc	hl
+		ld	hl,SidPuffer
+		ld	a,(AtaDest)
+		ld	d,a
+		ld	e,0
+		ld	bc,256
+		ldir
 		ld	a,$B0
 		out	($02),a
-		ld	(TesztP),hl
+		pop	bc
+		ld	h,$FA
+		ld	l,c
+		ld	a,(AtaDest)
+		ld	(hl),a
+		inc	a
+		ld	(AtaDest),a
+	TmTov:
+		inc	c
+		jr	nz,TmKor
+		ld	hl,$FB00
+		xor	a
+	TmT:
+		ld	(hl),a
+		inc	l
+		jr	nz,TmT
+		ld	a,(AtaDest)
+		ld	(CpuPool),a
+		ld	a,ATA_VVEG
+		ld	(CpuPoolMax),a
 		ret
-	TesztP:
+	TmTele:
+		ld	a,2
+		ld	(AtHiba),a
+		ret
+
+	AtaMIX:
 		dw	0
-	TesztN:
+	AtaMIY:
+		dw	0
+	AtaMBC:
+		dw	0
+	AtaMDE:
+		dw	0
+	AtaMHL:
+		dw	0
+	AtaMAF:
+		dw	0
+	AtaVP:
+		dw	0
+	AtaN:
+		dw	0
+	AtaM:
+		dw	0
+	AtaDest:
+		db	0
+	AtaKepVeg:
+		db	0
+	AtaTmp:
+		db	0,0,0,0,0,0,0,0,0,0,0,0
+	");
+end;
+
+/* ---------------------------------------------------------------- mentes: a dal ($5000-, AtHossz) -> Fajlnev (ROM-mal)
+   Formatum: 2 byte hossz, a $C000 feletti resz (U3: 1 KB-onkent a SidPuffer-en at), a $5000-$BFFF resz. Hiba: 1 */
+procedure Mentes();
+begin
+	asm("
+		xor	a
+		ld	(Hiba),a
+		ld	($0B6B),a
+		ld	de,Fajlnev
+		rst	$30
+		db	$53					;	CAS_CRTE
+		push	af
+		pop	hl
+		ld	(MeEredm),hl
+		jr	z,MeNyitva
+		ld	a,1
+		ld	(Hiba),a
+		ret
+	MeNyitva:
+		ld	de,AtHossz
+		ld	bc,2
+		rst	$30
+		db	$52
+		push	af
+		pop	hl
+		ld	(MeEredm+2),hl
+		ld	(MeEredm+4),bc
+		ld	hl,(AtHossz)
+		ld	de,$C000-$5000
+		or	a
+		sbc	hl,de
+		jr	c,MeFej
+		jr	z,MeFej
+		ld	(MeMaradt),hl
+		ld	hl,$C000
+		ld	(MeForras),hl
+	MeDarab:
+		ld	hl,(MeMaradt)
+		ld	a,h
+		or	l
+		jr	z,MeFej
+		ld	bc,1024
+		ld	de,1024
+		or	a
+		sbc	hl,de
+		jr	nc,MeD1
+		ld	bc,(MeMaradt)
+	MeD1:
+		ld	(MeDb),bc
+		di
+		ld	a,$B0
+		out	($02),a
+		ld	hl,(MeForras)
+		ld	de,SidPuffer
+		ldir
+		ld	(MeForras),hl
+		ld	a,($0003)
+		out	($02),a
+		ei
+		ld	hl,(MeMaradt)
+		ld	de,(MeDb)
+		or	a
+		sbc	hl,de
+		ld	(MeMaradt),hl
+		ld	de,SidPuffer
+		ld	bc,(MeDb)
+		rst	$30
+		db	$52
+		jr	MeDarab
+	MeFej:
+		ld	hl,(AtHossz)
+		ld	bc,$C000-$5000
+		or	a
+		sbc	hl,bc
+		jr	nc,MeF1
+		ld	bc,(AtHossz)
+	MeF1:
+		ld	de,$5000
+		rst	$30
+		db	$52
+		push	af
+		pop	hl
+		ld	(MeEredm+6),hl
+		ld	(MeEredm+8),bc
+		rst	$30
+		db	$54
+		push	af
+		pop	hl
+		ld	(MeEredm+10),hl
+		ret
+	MeEredm:
+		dw	0,0,0,0,0,0
+	MeMaradt:
+		dw	0
+	MeForras:
+		dw	0
+	MeDb:
 		dw	0
 	");
 end;
@@ -861,6 +1187,49 @@ begin
 	TVC::WriteAt(2, 15, "zold = lejatszo");
 end;
 
+/* ---------------------------------------------------------------- nincs kiszamolt dal: a TVC kiszamolja a .sid-bol */
+procedure Kiszamol();
+begin
+	TVC::WriteAt(2, 18, "SID betoltes...     ");
+	SidBetolt();
+	if (Hiba <> 0) then
+	begin
+		TVC::WriteAt(2, 18, "Nincs SID fajl!     ");
+		return;
+	end;
+	TVC::WriteAt(2, 18, "Szamolas...         ");
+	Atalakitas();
+	TVC::SetGraphicsMode(TVC::GRAPHICS4);
+	Menu();
+	Hiba := 1;
+	if (AtHiba <> 0) then
+	begin
+		TVC::WriteAt(2, 18, "Szamolasi hiba!     ");
+		return;
+	end;
+	TVC::WriteAt(2, 18, "Mentes...           ");
+	Mentes();
+	Hiba := 0;
+end;
+
+/* ---------------------------------------------------------------- a kivalasztott aldal: betoltes vagy kiszamolas, lejatszas */
+procedure DalInditas();
+begin
+	Fajlnev[16] := $30;
+	if (Dal >= 10) then Fajlnev[16] := $31;
+	Fajlnev[17] := $30 + Dal;
+	if (Dal >= 10) then Fajlnev[17] := $30 + Dal - 10;
+	TVC::WriteAt(2, 18, "Betoltes...         ");
+	Betolt();
+	if (Hiba <> 0) then Kiszamol();
+	if (Hiba = 0) then
+	begin
+		TVC::WriteAt(2, 18, "Szol                ");
+		Lejatszas();
+		Menu();
+	end;
+end;
+
 begin
 	TVC::SetGraphicsMode(TVC::GRAPHICS4);	/* a hang-IT a port 6-ra GR4 modbitet (1) ir */
 	CpuKod();	/* csak hogy a fordito bent hagyja (azonnal visszater) */
@@ -874,43 +1243,7 @@ begin
 		if (Kod = $30) then Dal := 10;
 		if (Kod = $41) then Dal := 11;
 		if (Kod = $61) then Dal := 11;
-		if (Kod = $54) then Kod := $74;
-		if (Kod = $74) then
-		begin
-			TVC::WriteAt(2, 18, "SID betoltes...     ");
-			SidBetolt();
-			if (Hiba = 0) then
-			begin
-				TVC::WriteAt(2, 18, "6502 teszt...       ");
-				CpuTeszt();
-				TVC::WriteAt(2, 18, "Teszt kesz          ");
-			end
-			else
-				TVC::WriteAt(2, 18, "Nincs SID fajl!     ");
-		end;
-		if (Kod = $57) then Kod := $77;
-		if (Kod = $77) then
-		begin
-			TVC::WriteAt(2, 18, "Iras...             ");
-			IrasProba();
-			TVC::WriteAt(2, 18, "Iras kesz           ");
-		end;
-		if (Dal <> 0) then
-		begin
-			Fajlnev[16] := $30;
-			if (Dal >= 10) then Fajlnev[16] := $31;
-			Fajlnev[17] := $30 + Dal;
-			if (Dal >= 10) then Fajlnev[17] := $30 + Dal - 10;
-			TVC::WriteAt(2, 18, "Betoltes...        ");
-			Betolt();
-			if (Hiba = 0) then
-			begin
-				TVC::WriteAt(2, 18, "Szol                ");
-				Lejatszas();
-				Menu();
-			end
-			else
-				TVC::WriteAt(2, 18, "Nincs ilyen fajl!   ");
-		end;
+
+		if (Dal <> 0) then DalInditas();
 	end;
 end.
