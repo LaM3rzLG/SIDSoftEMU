@@ -1,5 +1,9 @@
 # 2. lépés: teljes TVC-s SID-lejátszó – terv (2026-10-31)
 
+> **ELVETVE (a felhasználó döntése, 2026-10-31):** megépült és működött (6502-emu + átalakító a TVC-n, freeTVC-ben
+> bájtra egyezett, ~1,3x a dal hossza), de lassú és gyengébben tömörít, mint a PC-s átalakítás. A kód a git
+> `tvc-atalakito` címkéjén megvan. Helyette: önálló, több platformon futó `sid2tvc` (PC), a TVC csak lejátszik.
+
 Cél: a TVC **maga** tölti be az eredeti `.sid` fájlt, lejátszás előtt **ő** alakítja át a saját dalformátumára,
 elmenti, és utána veszteség nélkül lejátssza. A PC csak referenciának és a lemez összeállításához kell.
 

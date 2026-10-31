@@ -45,29 +45,13 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   port 5, CRTC R10/R11 = 3) és a menübe. Dekódoló asm-ben: zöld sáv ~2-3%.
 - Méretek: 26-41 KB; **az 5. aldal 47 KB, nem fér el** (nincs a lemezen) - jobb tömörítés kell (pl. 2 szintű REF).
   A 2. és 9. aldalnak 10 percen belül nincs hurka (10 perc után elölről).
-- **MOST ÉPÜL (a felhasználó döntése, 2026-10-31): teljes TVC-s SID-lejátszó, terv: `docs/02_TVC_SID_lejatszo_terv.md`.**
-  **Névrend (a felhasználó döntése):** a `SID` mappában BÁRMILYEN nevű .sid lehet (8.3); a kiszámolt párja
-  **`SID_TVC\<NÉV>\<nn>.STC`** (.sid-enként almappa, aldalanként egy fájl). Repóban: `sid/LNINJA.SID`,
-  `sid_tvc/LNINJA/03.STC` (a build mindkettőt a lemezre teszi; `make_dsk.ps1` tetszőleges mélységű mappát tud).
-  1. lépés KÉSZ (emu): a lejátszó a `SID_TVC\LNINJA\nn.STC`-ből tölt, programból is megy az elérési út.
-  **2026-10-31: A TELJES ÚT MŰKÖDIK (freeTVC + ep128emu):** menü -> ha nincs .STC: `SID\LNINJA.SID` betöltés ->
-  6502-emu (`cpu6502.ras`, generált: `tools/gen_cpu6502.py`) + átalakító (`atalakito.ras`, generált:
-  `tools/gen_atalakito.py` <- `tools/atalakito_src.asm`) -> mentés `SID_TVC\LNINJA\nn.STC` -> lejátszás.
-  A TVC kimenete BÁJTRA egyezik a Python-referenciával (`tools/tvc_atalakito.py`); ellenőrzők: `tools/z80.py`,
-  `z80_cpu_teszt.py`, `z80_at_teszt.py`, `dsk_olvas.py`. Gyors teszt: freeTVC headless (`--disk A:x.dsk --autostart
-  x.dsk --key 5@1200 --frames 40000`, ~35 s), utána `tools/dsk_olvas.py`.
-  Mért: számolás ~1,5x a dal hossza (LN 5. aldal 14621 kép = ~7 perc); a dal a memória végéig (~4:50) megy, hurok
-  NINCS (elölről indul) - KÖVETKEZŐ: hurokkeresés, gyorsítás, 64K-s valódi gépen próba.
-  Tanulságok: ep128emu a lemezképet csak sávváltáskor / motor-leálláskor írja ki (mentés után azonnali lejátszásnál
-  a .dsk-ban 0 byte látszik - NEM hiba); TRSE: `t[17] := t[17] + 1` (byte-tömb, konstans index) nem működött;
-  `FajlTeszt.ras` (+ `resources/build_fajlteszt.sh`) = lemezművelet-próba. Menü -> ha van kiszámolt fájl, rögtön szól; ha nincs, a TVC kiszámolja (Z80-as 6502-emu,
-  "Számolás... %"), lemezre menti, lejátssza. Csak a kiválasztott aldalt számolja. Lejátszás változatlan.
-  Mért (Macen): LN egy aldala csak ~4 KB (az init a 4 KB-os blokkot $B000-ra másolja, a play csak $B000-$BA6D +
-  nullás lap + $2000 ugrótábla), play átlag ~470 / max ~1400 6502-utasítás képkockánként -> becslés: számolás =
-  a dal hosszának ~0,5-0,9-szerese. Ötlet: 5140 Hz-es IT (osztó 38) -> TVC-lépés = SID-frekv. x 3/4.
-  VT-DOS tud mappát (MKDIR/CD/PATH, `\` út). Lépések: (1) `make_dsk.ps1` mappákkal + a mostani lejátszó
-  `SID_TVC\`-ből tölt (próba emu + valódi gép SD); (2) Z80-as 6502-emu a TVC-n, LN init + N képkocka, SID-írások
-  összevetése a PC-s dumppal, sebesség a keretben; (3) lemezre írás (még sosem próbáltuk); (4) összerakás.
+- **TVC-s .sid-átalakítás: ELVETVE (a felhasználó döntése, 2026-10-31)** - megépült, működött (freeTVC-ben bájtra
+  egyezett), de lassú (~1,3x a dal hossza) és gyengébben tömörít; kód: git címke `tvc-atalakito`, terv: `docs/02_...md`.
+  **Az új irány:** (1) a TVC csak lejátszik (`SID_TVC\<NÉV>\<nn>.STC`, .sid nincs a lemezen); (2) **önálló, több
+  platformon (Mac, Linux, Windows) futó `sid2tvc` alkalmazás** a PC-n; (3) SIDSoftEMU: **hangminőség + hurkok**.
+  A program most $2295-ig tart -> a dal kezdete $5000 helyett ~$2300 lehet (~51 KB hely, az 5. aldal is elfér).
+  Tanulságok (a skillben): fájlírás asm-ből, IY/AF' visszaállítás ROM-hívás előtt, ep128emu lemezkép-puffer,
+  freeTVC headless + monitor `profile` a pontos méréshez, OrgAsm `(ix+NEV+1)` hiba.
 - Folytatási ötletek: hangminőség (szűrő közelítése táblával, finomabb szintek/keverés, zaj), 5. aldal
   tömörítése, más .sid-ek kipróbálása, dal neve a fájlból a menüben.
 
