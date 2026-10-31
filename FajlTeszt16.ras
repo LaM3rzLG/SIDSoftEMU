@@ -45,6 +45,7 @@ var
 	Ir16_Szoveg						:	^byte;
 	Ir16_Szel, Ir16_Px, Ir16_Bdb, Ir16_H	:	byte = 0;
 	Ir16_Hossz						:	byte = 0;
+	Ir16_Hatter						:	byte = 0;		/* a szoveg teglalapjanak szine (GR16 minta); a betu OR-ral kerul ra */
 	Ir16_Dst						:	integer = 0;
 
 
@@ -82,7 +83,8 @@ Procedure Ir16(Ir16_X, Ir16_Y : global byte; Ir16_Szoveg : global ^byte);
 Ir16Torol:
 			push bc
 			push hl
-			ld (hl),0
+			ld a,[Ir16_Hatter]
+			ld (hl),a
 			ld a,[Ir16_Bdb]
 			dec a
 			jr z,Ir16Torol1
@@ -417,8 +419,14 @@ end;
 /* a lista n-edik bejegyzese az y kepsorba */
 procedure SorRajz(n : byte);
 begin
-	GE::FillRect(0, y, 64, 12, 0);
-	if (n = Sel) then Ir16(0, y, ">");
+	/* kijelolt sor: sotetkek sav. A font szinei (13, 5) mind tartalmazzak a kek bitet, igy az OR nem valtoztat rajtuk. */
+	if (n = Sel) then
+	begin
+		GE::FillRect(0, y - 1, 64, 12, GE::GR16_COLOR_DARKBLUE);
+		Ir16_Hatter := GE::GR16_COLOR_DARKBLUE;
+	end
+	else
+		GE::FillRect(0, y - 1, 64, 12, 0);
 	BejCim(n);
 	NevMasol();
 	Ir16(NEV_X, y, #Nev);
@@ -440,6 +448,7 @@ begin
 		Ir16(MERET_JOBB - Ir16_Hossz, y, #SzamSz);
 		Ir16(MERET_JOBB + 1, y, "KB");
 	end;
+	Ir16_Hatter := 0;
 end;
 
 
@@ -454,7 +463,7 @@ begin
 		if (a < Db) then
 			SorRajz(Top + i)
 		else
-			GE::FillRect(0, y, 64, 12, 0);
+			GE::FillRect(0, y - 1, 64, 12, 0);
 		i := i + 1;
 	end;
 	if (Db = 0) then
@@ -558,8 +567,11 @@ begin
 	else
 	begin
 		/* csak a jelek */
-		GE::FillRect(0, LISTA_Y + (Regi - Top) * 12, 3, 10, 0);
-		Ir16(0, LISTA_Y + (Sel - Top) * 12, ">");
+		/* csak a regi es az uj sor (a sav miatt) */
+		y := LISTA_Y + (Regi - Top) * 12;
+		SorRajz(Regi);
+		y := LISTA_Y + (Sel - Top) * 12;
+		SorRajz(Sel);
 	end;
 end;
 

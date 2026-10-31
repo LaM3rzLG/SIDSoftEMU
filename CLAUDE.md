@@ -88,6 +88,8 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
 - **FajlTeszt16 (2026-10-31, freeTVC-ben kipróbálva):** a FajlTeszt GRAPHICS16-ban, Ir16 + font16.bin; 14 sor, sorköz 12,
   oszlop = byte = 2 pont; build `bash resources/build_fajlteszt16_mac.sh`, `load"FAJLT16"`. freeTVC: `--disk-card --disk-rom 1.2`
   kell (a HBF-ROM-mal a FISH-lista üres, hiba 255).
+  Kiemelő sáv: sötétkék (szín 1) teljes sor; `Ir16_Hatter` = a téglalap törlőszíne, a betű OR-ral kerül rá (a font 13/5 színei
+  tartalmazzák a kék bitet, így nem változnak). Más sávszínhez maszkos rajzolás kellene.
 - Folytatási ötletek: hangminőség (szűrő közelítése táblával, finomabb szintek/keverés, zaj), 5. aldal
   tömörítése, más .sid-ek kipróbálása, dal neve a fájlból a menüben.
 
