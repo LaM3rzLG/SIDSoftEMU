@@ -45,7 +45,8 @@ var
 	Ir16_Szoveg						:	^byte;
 	Ir16_Szel, Ir16_Px, Ir16_Bdb, Ir16_H	:	byte = 0;
 	Ir16_Hossz						:	byte = 0;
-	Ir16_Hatter						:	byte = 0;		/* a szoveg teglalapjanak szine (GR16 minta); a betu OR-ral kerul ra */
+	Ir16_Hatter						:	byte = 0;
+	SavY, SavMod, Cs_S, Cs_Y0, Cs_N	:	byte = 0;	/* a csuszo kiemelo sav (SavSor, Csusztat) */		/* a szoveg teglalapjanak szine (GR16 minta); a betu OR-ral kerul ra */
 	Ir16_Dst						:	integer = 0;
 
 
@@ -304,6 +305,56 @@ Procedure Ir16_Hossza(Ir16_Szoveg : global ^byte);
 	end;
 
 
+/* ---------------------------------------------------------------- kiemelo sav, egy pontsor (64 byte) a SavY kepsorban
+   SavMod = 1: kek hozza (OR $03 - a betu szinei mar tartalmazzak a kek bitet, nem valtoznak);
+   SavMod = 0: a tiszta kek (1-es) pontok feketek lesznek, a betu pontjai maradnak. */
+procedure SavSor(SavY, SavMod : global byte);
+begin
+	asm("
+		ld a,[SavY]
+		ld l,a
+		ld h,0
+		add hl,hl
+		add hl,hl
+		add hl,hl
+		add hl,hl
+		add hl,hl
+		add hl,hl
+		ld de,[GE_ScreenAddr]
+		add hl,de
+		ld b,64
+		ld a,[SavMod]
+		or a
+		jr z,SavTorol
+SavFest:
+		ld a,(hl)
+		or $03
+		ld (hl),a
+		inc hl
+		djnz SavFest
+		jr SavVege
+SavTorol:
+		ld a,(hl)
+		ld c,a
+		and $AA
+		cp $02
+		jr nz,SavT1
+		res 1,c
+SavT1:
+		ld a,c
+		and $55
+		cp $01
+		jr nz,SavT2
+		res 0,c
+SavT2:
+		ld (hl),c
+		inc hl
+		djnz SavTorol
+SavVege:
+	");
+end;
+
+
 /* ---------------------------------------------------------------- az egyetlen asm: FISH-hivas
    C = FishKod (04H elso / 05H kovetkezo keresese), DE -> FPB {IX = 0, HL = ut, DE = MintaFcb, BC = TalaltFcb};
    eredmeny: FishHiba (0 = van bejegyzes). A hivas a $70-es lapozassal megy (mint a SIDSoftEMU-ban). */
@@ -549,6 +600,35 @@ end;
 
 
 /* ---------------------------------------------------------------- mozgas */
+/* a sav atcsuszik a Regi sorbol a szomszedos Sel sorba: pontsoronkent, kepkockankent 3 sor (4 kepkocka) */
+procedure Csusztat();
+begin
+	Cs_Y0 := LISTA_Y - 1 + (Regi - Top) * 12;
+	Cs_N := 0;
+	Cs_S := 0;
+	while (Cs_S < 12) do
+	begin
+		if (Sel > Regi) then
+		begin
+			SavSor(Cs_Y0 + Cs_S, 0);
+			SavSor(Cs_Y0 + 12 + Cs_S, 1);
+		end
+		else
+		begin
+			SavSor(Cs_Y0 + 11 - Cs_S, 0);
+			SavSor(Cs_Y0 - 1 - Cs_S, 1);
+		end;
+		Cs_S := Cs_S + 1;
+		Cs_N := Cs_N + 1;
+		if (Cs_N = 3) then
+		begin
+			Cs_N := 0;
+			GE::WaitForSync();
+		end;
+	end;
+end;
+
+
 procedure UjSel(n : byte);
 begin
 	Regi := Sel;
@@ -567,7 +647,12 @@ begin
 	else
 	begin
 		/* csak a jelek */
-		/* csak a regi es az uj sor (a sav miatt) */
+		/* szomszedos sor: csuszik a sav; kulonben a regi es az uj sor ujra */
+		if ((Sel = Regi + 1) or (Sel + 1 = Regi)) then
+		begin
+			Csusztat();
+			return;
+		end;
 		y := LISTA_Y + (Regi - Top) * 12;
 		SorRajz(Regi);
 		y := LISTA_Y + (Sel - Top) * 12;

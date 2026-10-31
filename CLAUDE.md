@@ -90,6 +90,8 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   kell (a HBF-ROM-mal a FISH-lista üres, hiba 255).
   Kiemelő sáv: sötétkék (szín 1) teljes sor; `Ir16_Hatter` = a téglalap törlőszíne, a betű OR-ral kerül rá (a font 13/5 színei
   tartalmazzák a kék bitet, így nem változnak). Más sávszínhez maszkos rajzolás kellene.
+  Szomszédos sorra a sáv CSÚSZIK (`Csusztat` + asm `SavSor`): pontsoronként egy sor kék le (csak a tiszta kék pont lesz
+  fekete), egy sor kék fel (OR $03); képkockánként 3 sor = 4 képkocka. Lapozás/görgetés: azonnal.
 - Folytatási ötletek: hangminőség (szűrő közelítése táblával, finomabb szintek/keverés, zaj), 5. aldal
   tömörítése, más .sid-ek kipróbálása, dal neve a fájlból a menüben.
 
