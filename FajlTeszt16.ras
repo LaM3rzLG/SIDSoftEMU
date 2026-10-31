@@ -306,8 +306,8 @@ Procedure Ir16_Hossza(Ir16_Szoveg : global ^byte);
 
 
 /* ---------------------------------------------------------------- kiemelo sav, egy pontsor (64 byte) a SavY kepsorban
-   SavMod = 1: kek hozza (OR $03 - a betu szinei mar tartalmazzak a kek bitet, nem valtoznak);
-   SavMod = 0: a tiszta kek (1-es) pontok feketek lesznek, a betu pontjai maradnak. */
+   A hatter mindig fekete, igy a pont maga a maszk: 0 = hatter, mas = betu (a fontban nincs 1-es, tiszta kek szin).
+   SavMod = 1: a fekete (0) pontok kekek (1) lesznek; SavMod = 0: a kek (1) pontok feketek. A betu pontjai nem valtoznak. */
 procedure SavSor(SavY, SavMod : global byte);
 begin
 	asm("
@@ -328,8 +328,17 @@ begin
 		jr z,SavTorol
 SavFest:
 		ld a,(hl)
-		or $03
-		ld (hl),a
+		ld c,a
+		and $AA
+		jr nz,SavF1
+		set 1,c
+SavF1:
+		ld a,c
+		and $55
+		jr nz,SavF2
+		set 0,c
+SavF2:
+		ld (hl),c
 		inc hl
 		djnz SavFest
 		jr SavVege
@@ -497,16 +506,18 @@ end;
 
 procedure SorRajz(n : byte);
 begin
-	/* kijelolt sor: sotetkek sav. A font szinei (13, 5) mind tartalmazzak a kek bitet, igy az OR nem valtoztat rajtuk. */
+	/* feketen kirajzolva; a kijelolt sor alatt a fekete pontok kekek lesznek (sav) */
+	GE::FillRect(0, y - 1, 64, 12, 0);
+	SorSzoveg(n);
 	if (n = Sel) then
 	begin
-		GE::FillRect(0, y - 1, 64, 12, GE::GR16_COLOR_DARKBLUE);
-		Ir16_Hatter := GE::GR16_COLOR_DARKBLUE;
-	end
-	else
-		GE::FillRect(0, y - 1, 64, 12, 0);
-	SorSzoveg(n);
-	Ir16_Hatter := 0;
+		Cs_S := 0;
+		while (Cs_S < 12) do
+		begin
+			SavSor(y - 1 + Cs_S, 1);
+			Cs_S := Cs_S + 1;
+		end;
+	end;
 end;
 
 
@@ -633,10 +644,6 @@ begin
 			GE::WaitForSync();
 		end;
 	end;
-	/* a regi sor szovege ujra, feketen: a kek bit nelkuli betupontok (8, 10) igy visszakapjak a szinuket */
-	y := LISTA_Y + (Regi - Top) * 12;
-	Ir16_Hatter := 0;
-	SorSzoveg(Regi);
 end;
 
 

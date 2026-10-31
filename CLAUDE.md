@@ -88,12 +88,9 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
 - **FajlTeszt16 (2026-10-31, freeTVC-ben kipróbálva):** a FajlTeszt GRAPHICS16-ban, Ir16 + font16.bin; 14 sor, sorköz 12,
   oszlop = byte = 2 pont; build `bash resources/build_fajlteszt16_mac.sh`, `load"FAJLT16"`. freeTVC: `--disk-card --disk-rom 1.2`
   kell (a HBF-ROM-mal a FISH-lista üres, hiba 255).
-  Kiemelő sáv: sötétkék (szín 1) teljes sor; `Ir16_Hatter` = a téglalap törlőszíne, a betű OR-ral kerül rá (a font 13/5 színei
-  tartalmazzák a kék bitet, így nem változnak). Más sávszínhez maszkos rajzolás kellene.
-  Szomszédos sorra a sáv CSÚSZIK (`Csusztat` + asm `SavSor`): pontsoronként egy sor kék le (csak a tiszta kék pont lesz
-  fekete), egy sor kék fel (OR $03); képkockánként 3 sor = 4 képkocka. Lapozás/görgetés: azonnal.
-  A csúszás végén a régi sor szövege újra (`SorSzoveg`, fekete háttér): a kék bit nélküli betűpontok (8, 10) így nem maradnak
-  elszíneződve (maszk nélkül, a felhasználó elfogadta a megoldás irányát).
+  Kiemelő sáv: sötétkék (szín 1), CSÚSZIK a szomszédos sorra (`Csusztat` + asm `SavSor`, képkockánként 3 pontsor = 4 kép).
+  A háttér mindig fekete, ezért a képpont maga a maszk: sáv be = 0 -> 1, sáv ki = 1 -> 0 (a fontban nincs 1-es szín), a betű
+  pontjai sosem változnak (az OR-os változat elszínezte a 8/10-es pontokat - a felhasználó "csúnya"-nak ítélte). Lapozás: azonnal.
 - Folytatási ötletek: hangminőség (szűrő közelítése táblával, finomabb szintek/keverés, zaj), 5. aldal
   tömörítése, más .sid-ek kipróbálása, dal neve a fájlból a menüben.
 
