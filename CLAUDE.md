@@ -45,6 +45,16 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   port 5, CRTC R10/R11 = 3) és a menübe. Dekódoló asm-ben: zöld sáv ~2-3%.
 - Méretek: 26-41 KB; **az 5. aldal 47 KB, nem fér el** (nincs a lemezen) - jobb tömörítés kell (pl. 2 szintű REF).
   A 2. és 9. aldalnak 10 percen belül nincs hurka (10 perc után elölről).
+- **KÖVETKEZŐ IRÁNY (a felhasználó javaslata, 2026-10-31): teljes TVC-s SID-lejátszó.** A lemezen az eredeti .sid
+  a **`SID`** mappában, a TVC által kiszámolt dal a **`SID_TVC`** mappában (pl. `SID\LNINJA.SID` ->
+  `SID_TVC\LNINJ03.DAL`). Menü -> ha van kiszámolt fájl, rögtön szól; ha nincs, a TVC kiszámolja (Z80-as 6502-emu,
+  "Számolás... %"), lemezre menti, lejátssza. Csak a kiválasztott aldalt számolja. Lejátszás változatlan.
+  Mért (Macen): LN egy aldala csak ~4 KB (az init a 4 KB-os blokkot $B000-ra másolja, a play csak $B000-$BA6D +
+  nullás lap + $2000 ugrótábla), play átlag ~470 / max ~1400 6502-utasítás képkockánként -> becslés: számolás =
+  a dal hosszának ~0,5-0,9-szerese. Ötlet: 5140 Hz-es IT (osztó 38) -> TVC-lépés = SID-frekv. x 3/4.
+  VT-DOS tud mappát (MKDIR/CD/PATH, `\` út). Lépések: (1) `make_dsk.ps1` mappákkal + a mostani lejátszó
+  `SID_TVC\`-ből tölt (próba emu + valódi gép SD); (2) Z80-as 6502-emu a TVC-n, LN init + N képkocka, SID-írások
+  összevetése a PC-s dumppal, sebesség a keretben; (3) lemezre írás (még sosem próbáltuk); (4) összerakás.
 - Folytatási ötletek: hangminőség (szűrő közelítése táblával, finomabb szintek/keverés, zaj), 5. aldal
   tömörítése, más .sid-ek kipróbálása, dal neve a fájlból a menüben.
 
