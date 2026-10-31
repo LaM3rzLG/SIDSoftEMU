@@ -15,7 +15,7 @@ program FajlTeszt16;
    Fel/Le = valasztas, Balra/Jobbra = lapozas, Enter = konyvtarba be / .STC (most csak kiirja), ESC = feljebb. */
 
 var
-	Font16_Data	:	incbin("resources/font16.bin");
+	Font16_Data	:	incbin("resources/font16_kek_cian.bin");
 
 	const LATHATO	: byte = 14;		/* ennyi listasor latszik */
 	const LISTA_Y	: byte = 27;		/* az elso listasor kepsora */
@@ -46,7 +46,9 @@ var
 	Ir16_Szel, Ir16_Px, Ir16_Bdb, Ir16_H	:	byte = 0;
 	Ir16_Hossz						:	byte = 0;
 	Ir16_Hatter						:	byte = 0;
-	SavY, SavMod, Cs_S, Cs_Y0, Cs_N	:	byte = 0;	/* a csuszo kiemelo sav (SavSor, Csusztat) */		/* a szoveg teglalapjanak szine (GR16 minta); a betu OR-ral kerul ra */
+	SavY, SavMod, Cs_S, Cs_Y0, Cs_N	:	byte = 0;
+	const SAV_SZIN	: byte = GE::GR16_COLOR_DARKMAGENTA;	/* a kiemelo sav (GR16 minta); a font16_kek_cian 0,1,5,8,9,10,13-at hasznal */
+	Sav_L, Sav_R	:	byte = 0;	/* a csuszo kiemelo sav (SavSor, Csusztat) */		/* a szoveg teglalapjanak szine (GR16 minta); a betu OR-ral kerul ra */
 	Ir16_Dst						:	integer = 0;
 
 
@@ -306,8 +308,9 @@ Procedure Ir16_Hossza(Ir16_Szoveg : global ^byte);
 
 
 /* ---------------------------------------------------------------- kiemelo sav, egy pontsor (64 byte) a SavY kepsorban
-   A hatter mindig fekete, igy a pont maga a maszk: 0 = hatter, mas = betu (a fontban nincs 1-es, tiszta kek szin).
-   SavMod = 1: a fekete (0) pontok kekek (1) lesznek; SavMod = 0: a kek (1) pontok feketek. A betu pontjai nem valtoznak. */
+   A hatter mindig fekete, igy a pont maga a maszk: 0 = hatter, mas = betu. A sav szine (SAV_SZIN) NE legyen a fontban.
+   SavMod = 1: a fekete (0) pontok sav-szinuek lesznek; SavMod = 0: a sav-szinu pontok feketek. A betu pontjai nem valtoznak.
+   Sav_L / Sav_R = a sav szinenek bal / jobb pontja (SAV_SZIN & $AA / & $55). */
 procedure SavSor(SavY, SavMod : global byte);
 begin
 	asm("
@@ -323,6 +326,10 @@ begin
 		ld de,[GE_ScreenAddr]
 		add hl,de
 		ld b,64
+		ld a,[Sav_L]
+		ld d,a
+		ld a,[Sav_R]
+		ld e,a
 		ld a,[SavMod]
 		or a
 		jr z,SavTorol
@@ -331,12 +338,16 @@ SavFest:
 		ld c,a
 		and $AA
 		jr nz,SavF1
-		set 1,c
+		ld a,c
+		or d
+		ld c,a
 SavF1:
 		ld a,c
 		and $55
 		jr nz,SavF2
-		set 0,c
+		ld a,c
+		or e
+		ld c,a
 SavF2:
 		ld (hl),c
 		inc hl
@@ -346,15 +357,19 @@ SavTorol:
 		ld a,(hl)
 		ld c,a
 		and $AA
-		cp $02
+		cp d
 		jr nz,SavT1
-		res 1,c
+		ld a,c
+		and $55
+		ld c,a
 SavT1:
 		ld a,c
 		and $55
-		cp $01
+		cp e
 		jr nz,SavT2
-		res 0,c
+		ld a,c
+		and $AA
+		ld c,a
 SavT2:
 		ld (hl),c
 		inc hl
@@ -787,6 +802,8 @@ begin
 	GE::Init(GE::DIRECT_TO_SCREEN);			/* a firmware IT-kezelot kikapcsolja */
 	GE::SetMemory(GE::MEM_VID_ON);			/* U0, U1, VID, SYS */
 	GE::SetBorder(GE::BORDER_BLACK);
+	Sav_L := SAV_SZIN & $AA;
+	Sav_R := SAV_SZIN & $55;
 
 	Ut[0] := 92;		/* \ */
 	Ut[1] := 0;

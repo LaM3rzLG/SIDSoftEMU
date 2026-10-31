@@ -91,6 +91,8 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   Kiemelő sáv: sötétkék (szín 1), CSÚSZIK a szomszédos sorra (`Csusztat` + asm `SavSor`, képkockánként 3 pontsor = 4 kép).
   A háttér mindig fekete, ezért a képpont maga a maszk: sáv be = 0 -> 1, sáv ki = 1 -> 0 (a fontban nincs 1-es szín), a betű
   pontjai sosem változnak (az OR-os változat elszínezte a 8/10-es pontokat - a felhasználó "csúnya"-nak ítélte). Lapozás: azonnal.
+  Font most: `resources/font16_kek_cian.bin` (cián + sötétkék árnyék; forrás TVC_Kozos/tools/Fontok). A sáv színe `SAV_SZIN`
+  (most sötétlila), olyan szín kell, ami NINCS a fontban (ez a font: 0,1,5,8,9,10,13).
 - Folytatási ötletek: hangminőség (szűrő közelítése táblával, finomabb szintek/keverés, zaj), 5. aldal
   tömörítése, más .sid-ek kipróbálása, dal neve a fájlból a menüben.
 
