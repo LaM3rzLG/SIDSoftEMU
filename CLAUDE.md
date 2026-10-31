@@ -59,6 +59,12 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   Próba más dalokkal (HVSC: Hubbard, Galway, Tel): **a legtöbbnek nincs pontos memória-hurka 10 percen belül ->
   58-80 KB, nem fér el -> HUROKKERESÉS a legfontosabb** (pl. a kimenet ismétlődése); Tel "Wizzy": BRK az 1.
   képkockán (vizsgálni); kell `-n NÉV` (a 8 karakteres név ütközhet).
+- **Last Ninja 1-2-3 (2026-10-31, a felhasználó kérése):** `sid/Last_Ninja_{1,2,3}.sid` -> `sid_tvc/LNINJA{1,2,3}/SONGn.STC`
+  (`sid2tvc -a -n LNINJAj -o sid_tvc`), lemezen `SID_TVC\LNINJAj\SONGn.STC`. **A dal kezdete most $2800** (sid2tvc.c
+  SONG_BASE, a .ras Betolt/Lejatszas), max 50 944 B; a program vege $259D (< $2800 kell). 33/34 dal kesz; hianyzik az
+  **LN2 12. dal** (60 KB, nincs memoria-hurka -> hurokkereses kell). Menu: jatek 1-3, aldal 1-9, 0=10, A-C=11-13, ESC = vissza.
+  A dalok ~1 MB-ok -> **ket lemezkep**: `SIDSoftEMU.dsk` (LN1+LN3), `SIDSOFT2.dsk` (LN2; build: LEMEZ2 / $Lemez2).
+  ep128emu-ben kiprobalva: LN1/5 (47 KB) es LN2/4 a memoriaban bajtra egyezik a fajllal, LN3 szol, hianyzo dal = "Nincs ilyen dal!".
 - Folytatási ötletek: hangminőség (szűrő közelítése táblával, finomabb szintek/keverés, zaj), 5. aldal
   tömörítése, más .sid-ek kipróbálása, dal neve a fájlból a menüben.
 

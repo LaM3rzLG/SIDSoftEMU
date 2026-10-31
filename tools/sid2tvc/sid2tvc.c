@@ -5,7 +5,8 @@
  *
  *   sid2tvc [kapcsolok] fajl.sid
  *     -s N        aldal (alapertelmezes: a .sid kezdo dala); -a = az osszes aldal
- *     -o MAPPA    kimeneti mappa (alapertelmezes: SID_TVC); a dal: MAPPA/<NEV>/<nn>.STC
+ *     -o MAPPA    kimeneti mappa (alapertelmezes: SID_TVC); a dal: MAPPA/<NEV>/SONG<n>.STC
+ *     -n NEV      a mappa neve (alapertelmezes: a .sid fajlnevebol, 8 betu)
  *     -w          WAV elonezet is (pontosan ugy, ahogy a TVC-n szol): MAPPA/<NEV>/<nn>.WAV
  *     -f N        legfeljebb N kepkocka (50/mp, alapertelmezes 30000 = 10 perc)
  *     -q          csendes (csak hibak)
@@ -43,7 +44,7 @@
 #define VERZIO "1.0"
 
 /* ------------------------------------------------------------------ TVC-oldali allandok */
-#define SONG_BASE   0x5000              /* a dal cime a TVC-n */
+#define SONG_BASE   0x2800              /* a dal cime a TVC-n */
 #define TABLE_BASE  0xEF00              /* a hangtablak (a TVC generalja) */
 #define SONG_MAX    (TABLE_BASE - SONG_BASE)
 #define IT_PER_FRAME 100
@@ -872,11 +873,14 @@ static int wav_ir(const char *path, const All *T, int nfr)
 }
 
 /* ================================================================== egy aldal */
+static const char *nev_kapcsolo = NULL;     /* -n NEV */
+
 static void tvc_nev(const char *path, char *nev)
 {
     const char *b = path, *p;
     int n = 0;
-    for (p = path; *p; p++) if (*p == '/' || *p == '\\') b = p + 1;
+    if (nev_kapcsolo) b = nev_kapcsolo;
+    else for (p = path; *p; p++) if (*p == '/' || *p == '\\') b = p + 1;
     for (p = b; *p && *p != '.' && n < 8; p++) {
         int ch = toupper((unsigned char)*p);
         if (isalnum(ch) || ch == '_' || ch == '-') nev[n++] = (char)ch;
@@ -963,7 +967,7 @@ static int aldal(const SidFajl *s, const char *path, int song, const char *outdi
             }
         free(m);
     }
-    snprintf(fajl, sizeof(fajl), "%s/%02d.STC", mappa, song);
+    snprintf(fajl, sizeof(fajl), "%s/SONG%d.STC", mappa, song);
     fo = fopen(fajl, "wb");
     if (!fo) { fprintf(stderr, "\nnem irhato: %s\n", fajl); return 0; }
     {
@@ -975,7 +979,7 @@ static int aldal(const SidFajl *s, const char *path, int song, const char *outdi
     fclose(fo);
     info(" -> %s\n", fajl);
     if (wav) {
-        snprintf(fajl, sizeof(fajl), "%s/%02d.WAV", mappa, song);
+        snprintf(fajl, sizeof(fajl), "%s/SONG%d.WAV", mappa, song);
         if (wav_ir(fajl, T, dp.n)) info("  WAV: %s\n", fajl);
     }
     for (f = 0; f < dp.n; f++) free(dp.k[f].w);
@@ -989,11 +993,12 @@ static int aldal(const SidFajl *s, const char *path, int song, const char *outdi
 static void hasznalat(void)
 {
     printf("sid2tvc " VERZIO " - C64 .sid -> TVC SIDSoftEMU dal (.STC)\n"
-           "hasznalat: sid2tvc [-s N | -a] [-o MAPPA] [-w] [-f N] [-q] fajl.sid\n"
+           "hasznalat: sid2tvc [-s N | -a] [-o MAPPA] [-n NEV] [-w] [-f N] [-q] fajl.sid\n"
            "  -s N      aldal (alapertelmezes: a .sid kezdo dala)\n"
            "  -a        az osszes aldal\n"
-           "  -o MAPPA  kimenet: MAPPA/<NEV>/<nn>.STC (alapertelmezes: SID_TVC)\n"
-           "  -w        WAV elonezet is (a TVC hangja): MAPPA/<NEV>/<nn>.WAV\n"
+           "  -o MAPPA  kimenet: MAPPA/<NEV>/SONG<n>.STC (alapertelmezes: SID_TVC)\n"
+           "  -n NEV    a mappa neve (legfeljebb 8 betu; alapertelmezes: a .sid fajlnevebol)\n"
+           "  -w        WAV elonezet is (a TVC hangja): MAPPA/<NEV>/SONG<n>.WAV\n"
            "  -f N      legfeljebb N kepkocka (50/mp, alapertelmezes 30000)\n"
            "  -q        csak a hibak\n");
 }
@@ -1008,6 +1013,7 @@ int main(int argc, char **argv)
         if (!strcmp(argv[i], "-s") && i + 1 < argc) song = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-a")) osszes = 1;
         else if (!strcmp(argv[i], "-o") && i + 1 < argc) outdir = argv[++i];
+        else if (!strcmp(argv[i], "-n") && i + 1 < argc) nev_kapcsolo = argv[++i];
         else if (!strcmp(argv[i], "-w")) wav = 1;
         else if (!strcmp(argv[i], "-f") && i + 1 < argc) maxf = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-q")) csendes = 1;

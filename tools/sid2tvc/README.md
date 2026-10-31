@@ -20,16 +20,17 @@ ugyanazt adja (így a kimenet is bájtra azonos).
 ## Használat
 
 ```
-sid2tvc [-s N | -a] [-o MAPPA] [-w] [-f N] [-q] fajl.sid
+sid2tvc [-s N | -a] [-o MAPPA] [-n NÉV] [-w] [-f N] [-q] fajl.sid
   -s N      aldal (alapértelmezés: a .sid kezdő dala)
   -a        az összes aldal
-  -o MAPPA  kimenet: MAPPA/<NÉV>/<nn>.STC   (alapértelmezés: SID_TVC)
-  -w        WAV-előnézet is, pontosan a TVC hangjával: MAPPA/<NÉV>/<nn>.WAV
+  -o MAPPA  kimenet: MAPPA/<NÉV>/SONG<n>.STC   (alapértelmezés: SID_TVC)
+  -n NÉV    a mappa neve (legfeljebb 8 betű; alapértelmezés: a .sid fájlnevéből)
+  -w        WAV-előnézet is, pontosan a TVC hangjával: MAPPA/<NÉV>/SONG<n>.WAV
   -f N      legfeljebb N képkocka (50/mp; alapértelmezés 30000 = 10 perc)
   -q        csak a hibákat írja ki
 ```
 
-Példa: `sid2tvc -a -w Last_Ninja.sid` → `SID_TVC/LASTNINJ/01.STC ... 11.STC` (+ WAV).
+Példa: `sid2tvc -a -w Last_Ninja.sid` → `SID_TVC/LASTNINJ/SONG1.STC ... SONG11.STC` (+ WAV).
 A `<NÉV>` a .sid fájlnevéből jön (nagybetű, legfeljebb 8 karakter), mert a TVC lemezén 8.3-as nevek vannak.
 A `SID_TVC` mappát változatlan szerkezetben kell a TVC lemezére / SD-kártyájára másolni.
 
@@ -40,15 +41,15 @@ A `SID_TVC` mappát változatlan szerkezetben kell a TVC lemezére / SD-kártyá
 - **Hurok:** a dal első pontos ismétlődése (a teljes C64-memória alapján); a TVC-n a dal onnan ismétlődik.
   Ha 10 percen belül nincs ismétlődés, a dal a végén elölről indul.
 - **SID-burkoló (ADSR)** a valódi SID-időzítésekkel; hullámforma, impulzusszélesség, hangerő.
-- **Tömörítés** hangonként (ismétlődő részek visszahivatkozással); a kész dal legfeljebb ~40 KB lehet.
+- **Tömörítés** hangonként (ismétlődő részek visszahivatkozással); a kész dal legfeljebb ~50 KB lehet.
 - Minden kimenetet visszaellenőriz a TVC lejátszójának pontos mására.
 
 Nem kezeli (egyelőre): többszörös sebességű (CIA-val gyorsított) dalok, digi-hangok, a SID szűrője.
 
 ## A .STC formátum
 
-2 bájt hossz (L), majd a dal `$C000` feletti része, végül a `$5000..$BFFF` rész (így a TVC ROM-jával
-egyszerűen betölthető). A dal `$5000`-tól: 6 bájtos fejléc (a 3 hang folyamának címe), majd hangonként
+2 bájt hossz (L), majd a dal `$C000` feletti része, végül a `$2800..$BFFF` rész (így a TVC ROM-jával
+egyszerűen betölthető). A dal `$2800`-tól: 6 bájtos fejléc (a 3 hang folyamának címe), majd hangonként
 képkockánként egy rekord:
 
 | Kód | Jelentés |

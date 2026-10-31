@@ -13,9 +13,13 @@ if ($p.ExitCode -ne 0 -or $hibak -or -not (Test-Path $cas) -or (Get-Item $cas).L
   "FORDITASI HIBA (exit $($p.ExitCode)):"; Get-Content $ki | Select-Object -Last 15; exit 1
 }
 "forditas OK"
+# A dalok ~1 MB-ok, egy 720 KB-os lemezre nem ferenek: a $Lemez2 mappai a 2. lemezre (SIDSOFT2.dsk), a program mindkettore.
+$Lemez2 = @("LNINJA2")
 $lemez = @("SIDSoftEMU.cas=SIDSOFT.CAS")
-Get-ChildItem (Join-Path $Gyoker "sid_tvc") -Directory -ErrorAction SilentlyContinue | ForEach-Object { $d = $_.Name; Get-ChildItem $_.FullName -Filter "*.STC" | ForEach-Object { $lemez += ("sid_tvc/" + $d + "/" + $_.Name + "=SID_TVC/" + $d + "/" + $_.Name) } }
+$lemez2 = @("SIDSoftEMU.cas=SIDSOFT.CAS")
+Get-ChildItem (Join-Path $Gyoker "sid_tvc") -Directory -ErrorAction SilentlyContinue | ForEach-Object { $d = $_.Name; Get-ChildItem $_.FullName -Filter "*.STC" | ForEach-Object { $e = ("sid_tvc/" + $d + "/" + $_.Name + "=SID_TVC/" + $d + "/" + $_.Name); if ($Lemez2 -contains $d) { $lemez2 += $e } else { $lemez += $e } } }
 & (Join-Path $PSScriptRoot "make_dsk.ps1") -Out "SIDSoftEMU.dsk" -Files $lemez | Select-Object -Last 1
+& (Join-Path $PSScriptRoot "make_dsk.ps1") -Out "SIDSOFT2.dsk" -Files $lemez2 | Select-Object -Last 1
 
 # --- WinTVC: a regi peldany bezarasa, uj inditas a friss lemezzel (/d = A: lemez, /a = LOAD"*" -> az elso fajl, SIDSOFT.CAS) ---
 if (-not $NoEmu -and -not $Mac) {

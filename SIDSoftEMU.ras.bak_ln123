@@ -1,0 +1,647 @@
+program SIDSoftEMU;
+@use "TVC"
+
+/* SIDSoftEMU - SID-lejatszo (2026-10-31): a .sid-bol PC-n keszult dal (tools/sid2tvc.py -> sid_tvc/<NEV>/nn.STC, a lemezen SID_TVC\<NEV>\nn.STC)
+   lemezrol, 3 hang 5008 Hz-en ("A" valtozat: hangonkent 0..5 szint, osszeg a port 6-ra).
+   - Menu (a ROM el): 1..9, 0 = 10, A = 11 -> SID_TVC\LNINJA\nn.STC betoltese, lejatszas. Lejatszas kozben barmely gomb = vissza.
+   - Betoltes a ROM-mal (Lemmings-sorrend: $0B0A:=0, $D3 nyitas, $D2 olvasas, $D4 zaras). A fajl: 2 byte hossz,
+     aztan a dal $C000 feletti resze (ez $8000-ra jon = U2, onnan U3-ba masoljuk), vegul a $5000-$BFFF resz.
+   - Lejatszas: teljes 64K RAM ($B0: U0,U1,U2,U3; a kepet a CRTC a VID-bol mutatja tovabb), tablak $EF00-$FFFF
+     (TablaGen), dal $5000-tol (max 40,7 KB). Sajat IT a $38-on (IM 1); kilepeskor a rendszer-IT visszaall (F5 3E 70, mint GE::EnableTVCITHandler).
+   - Hang-IT: 3 fazisszamlalo IX, IY, HL'. Hangonkent 5 byte-os onmodosito res (V1SH..V3SH): tabla
+     (ld e,a / ld d,lap / ld a,(de) / nop) vagy negyszog (cp PW / sbc a,a / and AMP). A dekodolo asm-ben.
+   - Meres a keretben: IT = PIROS, lejatszo = ZOLD, szabad = FEKETE.
+   TILOS a fo programban lejatszas kozben: IX, IY, shadow regiszterek, ROM-hivas.
+   A program vege < $5000 kell legyen (.sym: EndBlock). */
+
+var
+	SidZaj		:	incbin("resources/sid_zaj.bin");		/* zaj-alak: 256 x 0..15 (a TablaGen-hez) */
+	Fajlnev		:	array[22] of byte = (21, $53, $49, $44, $5F, $54, $56, $43, $5C, $4C, $4E, $49, $4E, $4A, $41, $5C, $30, $33, $2E, $53, $54, $43);	/* "SID_TVC\LNINJA\03.STC" - az aldal a 16-17. byte */
+	Kod, Dal, Hiba	:	byte;
+	/* atalakitas: hiba (0 jo, 1 6502, 2 tul sok lap), figyelmeztetes */
+
+
+/* ---------------------------------------------------------------- betoltes (ROM-mal, a menubol) */
+procedure Betolt();
+begin
+	asm("
+		xor	a
+		ld	(Hiba),a
+		ld	($0B0A),a
+		ld	de,Fajlnev
+		rst	$30
+		db	$D3					;	CAS_OPEN, Z = ok
+		jr	z,BtNyitva
+		ld	a,1
+		ld	(Hiba),a
+		ret
+	BtNyitva:
+		ld	de,BtHossz
+		ld	bc,2
+		rst	$30
+		db	$D2					;	CAS_BKIN
+		ld	hl,(BtHossz)
+		ld	de,$C000-$5000		;	a $5000-$BFFF resz hossza
+		or	a
+		sbc	hl,de
+		jr	c,BtKicsi
+		jr	z,BtKicsi
+		;	a $C000 feletti resz: $8000-ra (U2), majd U3-ba
+		push	hl
+		ld	b,h
+		ld	c,l
+		ld	de,$8000
+		rst	$30
+		db	$D2
+		pop	bc
+		di
+		ld	a,$B0
+		out	($02),a
+		ld	hl,$8000
+		ld	de,$C000
+		ldir
+		ld	a,($0003)
+		out	($02),a
+		ei
+		ld	bc,$C000-$5000
+		jr	BtFo
+	BtKicsi:
+		ld	bc,(BtHossz)
+	BtFo:
+		ld	de,$5000
+		rst	$30
+		db	$D2
+		xor	a
+		rst	$30
+		db	$D4					;	zaras (olvasas)
+		ret
+	BtHossz:
+		dw	0
+	");
+end;
+
+/* ---------------------------------------------------------------- hangtablak generalasa (a TablaGen a Lejatszas asm-jeben): $EF00-$FFFF ($B0 lapozasban)
+   0. lap = csend; 1-15 = (fures, haromszog, zaj) x szint 1..5, ertek = TgSzint[szint][alak 0..15];
+   16. lap ($FF00) = keveres: (i & $FC) | 1 (GR4 modbit). Ugyanaz, mint a tools/sid2tvc.py build_tables(). */
+
+/* ---------------------------------------------------------------- lejatszas (SPACE-ig) */
+procedure Lejatszas();
+begin
+	asm("
+		;	--- mentes, atvetel
+		di
+		ld	(LjMentIX),ix
+		ld	(LjMentIY),iy
+		exx
+		ld	(LjMentHL),hl
+		ld	(LjMentDE),de
+		ld	(LjMentBC),bc
+		exx
+		ld	a,($0B12)
+		ld	(LjMentB12),a
+		ld	a,$B0				;	U0,U1,U2,U3
+		ld	($0003),a
+		out	($02),a
+		call	TablaGen			;	17 lap: $EF00-$FFFF
+		;	dekodolo-allapot: hangonkent 10 byte (mutato, var, refdb, visszater, lepes, szelet, PW)
+		ld	hl,DkAll
+		ld	b,30
+	LjTorl:
+		ld	(hl),0
+		inc	hl
+		djnz	LjTorl
+		ld	hl,($5000)
+		ld	(DkAll),hl
+		ld	hl,($5002)
+		ld	(DkAll+10),hl
+		ld	hl,($5004)
+		ld	(DkAll+20),hl
+		ld	a,128
+		ld	(DkAll+9),a
+		ld	(DkAll+19),a
+		ld	(DkAll+29),a
+		ld	hl,V1SH
+		call	SidResCsend
+		ld	hl,V2SH
+		call	SidResCsend
+		ld	hl,V3SH
+		call	SidResCsend
+		ld	hl,0
+		ld	(V1ST+1),hl
+		ld	(V2ST+1),hl
+		ld	(V3ST+1),hl
+		ld	ix,0
+		ld	iy,0
+		exx
+		ld	hl,0
+		ld	c,100
+		ld	b,0
+		exx
+		ld	hl,$38
+		ld	(hl),195
+		ld	de,SidIT
+		inc	hl
+		ld	(hl),e
+		inc	hl
+		ld	(hl),d
+		;	hang-IT: 5008 Hz (port 4 = $D9, port 5 also 4 bit = 15, bit 5 = IT)
+		ld	a,($0B12)
+		and	128+64
+		or	15+32
+		ld	($0B12),a
+		ld	c,91
+		in	b,(c)
+		out	($05),a
+		ld	a,$D9
+		out	($04),a
+		;	kurzor-IT ki (CRTC R10/R11 bit 5)
+		ld	a,10
+		out	($70),a
+		ld	a,3+32
+		out	($71),a
+		ld	a,11
+		out	($70),a
+		ld	a,3+32
+		out	($71),a
+		im	1
+		ei
+		;	--- elengedesre var (a menu gombja)
+	LjElenged:
+		call	BillAny
+		jr	nz,LjElenged
+
+		;	--- fo hurok: kepkockankent
+	LjKor:
+		xor	a
+		ld	(SidKeret),a
+		out	($00),a
+	LjVar:
+		ld	a,(SidFlag)
+		or	a
+		jr	z,LjVar
+		xor	a
+		ld	(SidFlag),a
+		ld	a,160			;	keret: zold = lejatszo
+		ld	(SidKeret),a
+		out	($00),a
+		;	3 hang dekodolasa: az allapotot a munkateruletre masoljuk, vissza
+		ld	hl,DkAll
+		ld	de,Res
+		call	DkHang
+		ld	hl,DkAll+10
+		ld	de,Res+5
+		call	DkHang
+		ld	hl,DkAll+20
+		ld	de,Res+10
+		call	DkHang
+		;	a resek + lepesek atirasa (di/ei)
+		di
+		ld	hl,Res
+		ld	de,V1SH
+		ld	bc,5
+		ldir
+		ld	de,V2SH
+		ld	bc,5
+		ldir
+		ld	de,V3SH
+		ld	bc,5
+		ldir
+		ld	hl,(DkAll+6)
+		ld	(V1ST+1),hl
+		ld	hl,(DkAll+16)
+		ld	(V2ST+1),hl
+		ld	hl,(DkAll+26)
+		ld	(V3ST+1),hl
+		ei
+		;	barmely gomb = vissza a menube
+		call	BillAny
+		jr	z,LjKor
+
+		;	--- visszaadas a rendszernek
+		di
+		ld	hl,$38
+		ld	(hl),$F5
+		inc	hl
+		ld	(hl),$3E
+		inc	hl
+		ld	(hl),$70
+		ld	a,1				;	hangero 0 (port 6 bit 2-5), GR4 modbit marad - kulonben sipol
+		out	($06),a
+		ld	a,(LjMentB12)
+		and	$CF				;	hang (bit 4) es hang-IT (bit 5) ki
+		ld	($0B12),a
+		out	($05),a
+		ld	a,10
+		out	($70),a
+		ld	a,3
+		out	($71),a
+		ld	a,11
+		out	($70),a
+		ld	a,3
+		out	($71),a
+		ld	a,$70
+		ld	($0003),a
+		out	($02),a
+		xor	a
+		out	($00),a
+		ld	ix,(LjMentIX)
+		ld	iy,(LjMentIY)
+		exx
+		ld	hl,(LjMentHL)
+		ld	de,(LjMentDE)
+		ld	bc,(LjMentBC)
+		exx
+		ei
+		ret
+
+	LjMentIX:
+		dw	0
+	LjMentIY:
+		dw	0
+	LjMentHL:
+		dw	0
+	LjMentDE:
+		dw	0
+	LjMentBC:
+		dw	0
+	LjMentB12:
+		db	0
+
+	;	------------------------------------------------ billentyuzet: Z = nincs lenyomva (sorok 0..9, port 3 / $58)
+	BillAny:
+		ld	a,($0B11)
+		and	$F0
+		ld	b,10
+	BaSor:
+		out	($03),a
+		ld	c,a
+		in	a,($58)
+		inc	a
+		ret	nz				;	nem $FF -> van lenyomott gomb (NZ)
+		ld	a,c
+		inc	a
+		djnz	BaSor
+		xor	a				;	Z
+		ret
+
+	;	------------------------------------------------ egy hang dekodolasa
+	;	HL = a hang allapota (10 byte), DE = a hang res-kepe (5 byte)
+	DkHang:
+		push	hl
+		push	de
+		ld	de,DkM
+		ld	bc,10
+		ldir
+		call	DkLep
+		pop	de
+		;	res-kep: tabla vagy negyszog
+		ld	a,(DkM+8)
+		bit	7,a
+		jr	nz,DkNegy
+		add	a,$EF
+		ex	de,hl
+		ld	(hl),$5F
+		inc	hl
+		ld	(hl),$16
+		inc	hl
+		ld	(hl),a
+		inc	hl
+		ld	(hl),$1A
+		inc	hl
+		ld	(hl),0
+		jr	DkVissza
+	DkNegy:
+		and	7
+		add	a,a
+		add	a,a
+		ld	b,a
+		ex	de,hl
+		ld	(hl),$FE
+		inc	hl
+		ld	a,(DkM+9)
+		ld	(hl),a
+		inc	hl
+		ld	(hl),$9F
+		inc	hl
+		ld	(hl),$E6
+		inc	hl
+		ld	(hl),b
+	DkVissza:
+		pop	de
+		ld	hl,DkM
+		ld	bc,10
+		ldir
+		ret
+
+	;	munkaterulet: +0 mutato, +2 var, +3 refdb, +4 visszateres, +6 lepes, +8 szelet, +9 PW
+	DkM:
+		db	0,0,0,0,0,0,0,0,0,0
+	DkAll:
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	Res:
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+
+	DkLep:
+		ld	a,(DkM+2)
+		or	a
+		jr	z,DkOlvas
+		dec	a
+		ld	(DkM+2),a
+		ret
+	DkOlvas:
+		ld	hl,(DkM)
+	DkKod:
+		ld	a,(hl)
+		cp	$10
+		jr	nz,DkNem10
+		inc	hl				;	REF lo hi n
+		ld	e,(hl)
+		inc	hl
+		ld	d,(hl)
+		inc	hl
+		ld	a,(hl)
+		ld	(DkM+3),a
+		inc	hl
+		ld	(DkM+4),hl
+		ex	de,hl
+		jr	DkKod
+	DkNem10:
+		cp	$11
+		jr	nz,DkNem11
+		inc	hl				;	VEGE lo hi
+		ld	e,(hl)
+		inc	hl
+		ld	d,(hl)
+		ex	de,hl
+		jr	DkKod
+	DkNem11:
+		inc	hl
+		bit	7,a
+		jr	z,DkRek
+		and	$7F				;	varakozas n kepkocka
+		dec	a
+		ld	(DkM+2),a
+		jr	DkVeg
+	DkRek:
+		ld	c,a
+		bit	0,c
+		jr	z,DkR1
+		ld	e,(hl)
+		inc	hl
+		ld	d,(hl)
+		inc	hl
+		ld	(DkM+6),de
+	DkR1:
+		bit	1,c
+		jr	z,DkR2
+		ld	a,(hl)
+		inc	hl
+		ld	e,a
+		rla
+		sbc	a,a
+		ld	d,a
+		push	hl
+		ld	hl,(DkM+6)
+		add	hl,de
+		ld	(DkM+6),hl
+		pop	hl
+	DkR2:
+		bit	2,c
+		jr	z,DkR3
+		ld	a,(hl)
+		inc	hl
+		ld	(DkM+8),a
+	DkR3:
+		bit	3,c
+		jr	z,DkVeg
+		ld	a,(hl)
+		inc	hl
+		ld	(DkM+9),a
+	DkVeg:
+		ld	a,(DkM+3)
+		or	a
+		jr	z,DkTarol
+		dec	a
+		ld	(DkM+3),a
+		jr	nz,DkTarol
+		ld	hl,(DkM+4)
+	DkTarol:
+		ld	(DkM),hl
+		ret
+
+	TablaGen:
+		ld	hl,$EF00
+		xor	a
+	TgCsend:
+		ld	(hl),a
+		inc	l
+		jr	nz,TgCsend
+		inc	h					;	$F000
+		ld	c,0					;	alak 0..2
+	TgAlak:
+		ld	de,TgSzint			;	szint 1..5: 16 byte-onkent
+		ld	b,5
+	TgSzintK:
+		push	bc
+	TgByte:
+		;	w = alak(l)
+		ld	a,c
+		or	a
+		jr	nz,TgNemFur
+		ld	a,l					;	fures: i >> 4
+		rrca
+		rrca
+		rrca
+		rrca
+		and	15
+		jr	TgW
+	TgNemFur:
+		dec	a
+		jr	nz,TgZaj
+		ld	a,l					;	haromszog: t = i >> 3; t < 16 ? t : 31 - t
+		rrca
+		rrca
+		rrca
+		and	31
+		cp	16
+		jr	c,TgW
+		cpl
+		add	a,32
+		jr	TgW
+	TgZaj:
+		push	hl
+		ld	a,l
+		ld	hl,SidZaj
+		add	a,l
+		ld	l,a
+		jr	nc,TgZ1
+		inc	h
+	TgZ1:
+		ld	a,(hl)
+		pop	hl
+	TgW:
+		push	de
+		ex	de,hl				;	HL = szinttabla, DE = lap
+		add	a,l
+		ld	l,a
+		jr	nc,TgW1
+		inc	h
+	TgW1:
+		ld	a,(hl)
+		ex	de,hl
+		pop	de
+		ld	(hl),a
+		inc	l
+		jr	nz,TgByte
+		inc	h					;	kovetkezo lap
+		ld	a,e
+		add	a,16
+		ld	e,a
+		jr	nc,TgW2
+		inc	d
+	TgW2:
+		pop	bc
+		djnz	TgSzintK
+		inc	c
+		ld	a,c
+		cp	3
+		jr	nz,TgAlak
+		;	keveres ($FF00)
+	TgKev:
+		ld	a,l
+		and	$FC
+		or	1
+		ld	(hl),a
+		inc	l
+		jr	nz,TgKev
+		ret
+	TgSzint:
+		db	0,0,0,0,0,0,0,0,4,4,4,4,4,4,4,4
+		db	0,0,0,0,4,4,4,4,4,4,4,4,8,8,8,8
+		db	0,0,0,4,4,4,4,4,8,8,8,8,8,12,12,12
+		db	0,0,4,4,4,4,8,8,8,8,12,12,12,12,16,16
+		db	0,0,4,4,4,8,8,8,12,12,12,16,16,16,20,20
+
+	SidResCsend:
+		ld	(hl),$5F
+		inc	hl
+		ld	(hl),$16
+		inc	hl
+		ld	(hl),$EF
+		inc	hl
+		ld	(hl),$1A
+		inc	hl
+		ld	(hl),0
+		ret
+
+	SidFlag:
+		db	0
+	SidKeret:
+		db	0
+
+	;	------------------------------------------------ A HANG-IT
+	SidIT:
+		ex	af,af'
+		exx
+		out	($07),a
+		ld	a,136			;	keret: piros (meres)
+		out	($00),a
+	V1ST:
+		ld	de,0
+		add	ix,de
+		ld	a,ixh
+	V1SH:
+		ld	e,a
+		ld	d,$EF
+		ld	a,(de)
+		nop
+		ld	b,a
+	V2ST:
+		ld	de,0
+		add	iy,de
+		ld	a,iyh
+	V2SH:
+		ld	e,a
+		ld	d,$EF
+		ld	a,(de)
+		nop
+		add	a,b
+		ld	b,a
+	V3ST:
+		ld	de,0
+		add	hl,de
+		ld	a,h
+	V3SH:
+		ld	e,a
+		ld	d,$EF
+		ld	a,(de)
+		nop
+		add	a,b
+		ld	e,a
+		ld	d,$FF			;	keverolap ($EF + 16)
+		ld	a,(de)
+		out	($06),a
+		dec	c
+		jr	z,SidKep
+	SidVege:
+		ld	a,(SidKeret)
+		out	($00),a
+		exx
+		ex	af,af'
+		ei
+		ret
+	SidKep:
+		ld	c,100
+		ld	a,1
+		ld	(SidFlag),a
+		jr	SidVege
+	");
+end;
+
+/* ---------------------------------------------------------------- menu */
+procedure Menu();
+begin
+	TVC::Cls();
+	TVC::WriteAt(2, 2, "SIDSoftEMU - SID a TVC-n");
+	TVC::WriteAt(2, 4, "The Last Ninja (1987)");
+	TVC::WriteAt(2, 5, "Ben Daglish, Anthony Lees");
+	TVC::WriteAt(2, 8, "Aldal: 1-9, 0 = 10, A = 11");
+	TVC::WriteAt(2, 10, "Lejatszas kozben:");
+	TVC::WriteAt(2, 11, "barmely gomb = vissza");
+	TVC::WriteAt(2, 14, "Keret: piros = hang-IT,");
+	TVC::WriteAt(2, 15, "zold = lejatszo");
+end;
+
+/* ---------------------------------------------------------------- a kivalasztott aldal: betoltes (SID_TVC\LNINJA\nn.STC), lejatszas */
+procedure DalInditas();
+begin
+	Fajlnev[16] := $30;
+	if (Dal >= 10) then Fajlnev[16] := $31;
+	Fajlnev[17] := $30 + Dal;
+	if (Dal >= 10) then Fajlnev[17] := $30 + Dal - 10;
+	TVC::WriteAt(2, 18, "Betoltes...         ");
+	Betolt();
+	if (Hiba <> 0) then TVC::WriteAt(2, 18, "Nincs ilyen dal!    ");
+	if (Hiba = 0) then
+	begin
+		TVC::WriteAt(2, 18, "Szol                ");
+		Lejatszas();
+		Menu();
+	end;
+end;
+
+begin
+	TVC::SetGraphicsMode(TVC::GRAPHICS4);	/* a hang-IT a port 6-ra GR4 modbitet (1) ir */
+	Menu();
+	while (true) do
+	begin
+		Kod := TVC::ReadKey();
+		Dal := 0;
+		if (Kod >= $31) then if (Kod <= $39) then Dal := Kod - $30;
+		if (Kod = $30) then Dal := 10;
+		if (Kod = $41) then Dal := 11;
+		if (Kod = $61) then Dal := 11;
+
+		if (Dal <> 0) then DalInditas();
+	end;
+end.

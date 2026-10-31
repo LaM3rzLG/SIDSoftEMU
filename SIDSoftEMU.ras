@@ -1,23 +1,25 @@
 program SIDSoftEMU;
 @use "TVC"
 
-/* SIDSoftEMU - SID-lejatszo (2026-10-31): a .sid-bol PC-n keszult dal (tools/sid2tvc.py -> sid_tvc/<NEV>/nn.STC, a lemezen SID_TVC\<NEV>\nn.STC)
+/* SIDSoftEMU - SID-lejatszo (2026-10-31): a .sid-bol PC-n keszult dal (tools/sid2tvc -> sid_tvc/<NEV>/SONGn.STC, a lemezen SID_TVC\<NEV>\SONGn.STC)
    lemezrol, 3 hang 5008 Hz-en ("A" valtozat: hangonkent 0..5 szint, osszeg a port 6-ra).
-   - Menu (a ROM el): 1..9, 0 = 10, A = 11 -> SID_TVC\LNINJA\nn.STC betoltese, lejatszas. Lejatszas kozben barmely gomb = vissza.
+   - Menu (a ROM el): jatek 1..3 (Last Ninja 1-3), majd aldal 1..9, 0 = 10, A..C = 11..13 -> SID_TVC\LNINJAj\SONGn.STC
+     betoltese, lejatszas; ESC = vissza a jatekvalasztashoz. Lejatszas kozben barmely gomb = vissza.
    - Betoltes a ROM-mal (Lemmings-sorrend: $0B0A:=0, $D3 nyitas, $D2 olvasas, $D4 zaras). A fajl: 2 byte hossz,
-     aztan a dal $C000 feletti resze (ez $8000-ra jon = U2, onnan U3-ba masoljuk), vegul a $5000-$BFFF resz.
+     aztan a dal $C000 feletti resze (ez $8000-ra jon = U2, onnan U3-ba masoljuk), vegul a $2800-$BFFF resz.
    - Lejatszas: teljes 64K RAM ($B0: U0,U1,U2,U3; a kepet a CRTC a VID-bol mutatja tovabb), tablak $EF00-$FFFF
-     (TablaGen), dal $5000-tol (max 40,7 KB). Sajat IT a $38-on (IM 1); kilepeskor a rendszer-IT visszaall (F5 3E 70, mint GE::EnableTVCITHandler).
+     (TablaGen), dal $2800-tol (max 50,9 KB). Sajat IT a $38-on (IM 1); kilepeskor a rendszer-IT visszaall (F5 3E 70, mint GE::EnableTVCITHandler).
    - Hang-IT: 3 fazisszamlalo IX, IY, HL'. Hangonkent 5 byte-os onmodosito res (V1SH..V3SH): tabla
      (ld e,a / ld d,lap / ld a,(de) / nop) vagy negyszog (cp PW / sbc a,a / and AMP). A dekodolo asm-ben.
    - Meres a keretben: IT = PIROS, lejatszo = ZOLD, szabad = FEKETE.
    TILOS a fo programban lejatszas kozben: IX, IY, shadow regiszterek, ROM-hivas.
-   A program vege < $5000 kell legyen (.sym: EndBlock). */
+   A program vege < $2800 kell legyen (.sym: EndBlock) - a dal kezdete (sid2tvc.c SONG_BASE). */
 
 var
 	SidZaj		:	incbin("resources/sid_zaj.bin");		/* zaj-alak: 256 x 0..15 (a TablaGen-hez) */
-	Fajlnev		:	array[22] of byte = (21, $53, $49, $44, $5F, $54, $56, $43, $5C, $4C, $4E, $49, $4E, $4A, $41, $5C, $30, $33, $2E, $53, $54, $43);	/* "SID_TVC\LNINJA\03.STC" - az aldal a 16-17. byte */
-	Kod, Dal, Hiba	:	byte;
+	Fajlnev		:	array[28] of byte = (25, $53, $49, $44, $5F, $54, $56, $43, $5C, $4C, $4E, $49, $4E, $4A, $41, $31, $5C, $53, $4F, $4E, $47, $31, $2E, $53, $54, $43, 0, 0);	/* "SID_TVC\LNINJA1\SONG1.STC": a jatek a 15., az aldal a 21. (22.) byte-tol */
+	DalSzam		:	array[4] of byte = (0, 11, 13, 10);	/* aldalak szama jatekonkent */
+	Kod, Dal, Hiba, Jatek, Poz	:	byte;
 	/* atalakitas: hiba (0 jo, 1 6502, 2 tul sok lap), figyelmeztetes */
 
 
@@ -41,7 +43,7 @@ begin
 		rst	$30
 		db	$D2					;	CAS_BKIN
 		ld	hl,(BtHossz)
-		ld	de,$C000-$5000		;	a $5000-$BFFF resz hossza
+		ld	de,$C000-$2800		;	a $2800-$BFFF resz hossza
 		or	a
 		sbc	hl,de
 		jr	c,BtKicsi
@@ -63,12 +65,12 @@ begin
 		ld	a,($0003)
 		out	($02),a
 		ei
-		ld	bc,$C000-$5000
+		ld	bc,$C000-$2800
 		jr	BtFo
 	BtKicsi:
 		ld	bc,(BtHossz)
 	BtFo:
-		ld	de,$5000
+		ld	de,$2800
 		rst	$30
 		db	$D2
 		xor	a
@@ -110,11 +112,11 @@ begin
 		ld	(hl),0
 		inc	hl
 		djnz	LjTorl
-		ld	hl,($5000)
+		ld	hl,($2800)
 		ld	(DkAll),hl
-		ld	hl,($5002)
+		ld	hl,($2802)
 		ld	(DkAll+10),hl
-		ld	hl,($5004)
+		ld	hl,($2804)
 		ld	(DkAll+20),hl
 		ld	a,128
 		ld	(DkAll+9),a
@@ -598,27 +600,69 @@ begin
 	");
 end;
 
-/* ---------------------------------------------------------------- menu */
+/* ---------------------------------------------------------------- menu: Jatek = 0 -> jatekvalasztas, kulonben az aldalak */
 procedure Menu();
 begin
 	TVC::Cls();
 	TVC::WriteAt(2, 2, "SIDSoftEMU - SID a TVC-n");
-	TVC::WriteAt(2, 4, "The Last Ninja (1987)");
-	TVC::WriteAt(2, 5, "Ben Daglish, Anthony Lees");
-	TVC::WriteAt(2, 8, "Aldal: 1-9, 0 = 10, A = 11");
-	TVC::WriteAt(2, 10, "Lejatszas kozben:");
-	TVC::WriteAt(2, 11, "barmely gomb = vissza");
+	if (Jatek = 0) then
+	begin
+		TVC::WriteAt(2, 4, "1 = The Last Ninja (1987)");
+		TVC::WriteAt(6, 5, "Ben Daglish, Anthony Lees");
+		TVC::WriteAt(2, 6, "2 = Last Ninja 2 (1988)");
+		TVC::WriteAt(6, 7, "Matt Gray");
+		TVC::WriteAt(2, 8, "3 = Last Ninja 3 (1991)");
+		TVC::WriteAt(6, 9, "Reyn Ouwehand");
+	end;
+	if (Jatek = 1) then
+	begin
+		TVC::WriteAt(2, 4, "The Last Ninja (1987)");
+		TVC::WriteAt(2, 5, "Ben Daglish, Anthony Lees");
+		TVC::WriteAt(2, 8, "Aldal: 1-9, 0 = 10, A = 11");
+	end;
+	if (Jatek = 2) then
+	begin
+		TVC::WriteAt(2, 4, "Last Ninja 2 (1988)");
+		TVC::WriteAt(2, 5, "Matt Gray");
+		TVC::WriteAt(2, 8, "Aldal: 1-9, 0=10, A-C=11-13");
+	end;
+	if (Jatek = 3) then
+	begin
+		TVC::WriteAt(2, 4, "Last Ninja 3 (1991)");
+		TVC::WriteAt(2, 5, "Reyn Ouwehand");
+		TVC::WriteAt(2, 8, "Aldal: 1-9, 0 = 10");
+	end;
+	if (Jatek <> 0) then TVC::WriteAt(2, 9, "ESC = masik jatek");
+	TVC::WriteAt(2, 11, "Lejatszas kozben:");
+	TVC::WriteAt(2, 12, "barmely gomb = vissza");
 	TVC::WriteAt(2, 14, "Keret: piros = hang-IT,");
 	TVC::WriteAt(2, 15, "zold = lejatszo");
 end;
 
-/* ---------------------------------------------------------------- a kivalasztott aldal: betoltes (SID_TVC\LNINJA\nn.STC), lejatszas */
+/* ---------------------------------------------------------------- a kivalasztott aldal: betoltes (SID_TVC\LNINJAj\SONGn.STC), lejatszas */
 procedure DalInditas();
 begin
-	Fajlnev[16] := $30;
-	if (Dal >= 10) then Fajlnev[16] := $31;
-	Fajlnev[17] := $30 + Dal;
-	if (Dal >= 10) then Fajlnev[17] := $30 + Dal - 10;
+	Fajlnev[15] := $30 + Jatek;
+	Poz := 21;
+	if (Dal < 10) then
+	begin
+		Fajlnev[Poz] := $30 + Dal;
+	end
+	else
+	begin
+		Fajlnev[Poz] := $31;
+		Poz := Poz + 1;
+		Fajlnev[Poz] := $30 + Dal - 10;
+	end;
+	Poz := Poz + 1;
+	Fajlnev[Poz] := $2E;
+	Poz := Poz + 1;
+	Fajlnev[Poz] := $53;
+	Poz := Poz + 1;
+	Fajlnev[Poz] := $54;
+	Poz := Poz + 1;
+	Fajlnev[Poz] := $43;
+	Fajlnev[0] := Poz;
 	TVC::WriteAt(2, 18, "Betoltes...         ");
 	Betolt();
 	if (Hiba <> 0) then TVC::WriteAt(2, 18, "Nincs ilyen dal!    ");
@@ -632,16 +676,33 @@ end;
 
 begin
 	TVC::SetGraphicsMode(TVC::GRAPHICS4);	/* a hang-IT a port 6-ra GR4 modbitet (1) ir */
+	Jatek := 0;
 	Menu();
 	while (true) do
 	begin
 		Kod := TVC::ReadKey();
-		Dal := 0;
-		if (Kod >= $31) then if (Kod <= $39) then Dal := Kod - $30;
-		if (Kod = $30) then Dal := 10;
-		if (Kod = $41) then Dal := 11;
-		if (Kod = $61) then Dal := 11;
-
-		if (Dal <> 0) then DalInditas();
+		if (Jatek = 0) then
+		begin
+			if (Kod >= $31) then if (Kod <= $33) then
+			begin
+				Jatek := Kod - $30;
+				Menu();
+			end;
+		end
+		else
+		begin
+			Dal := 0;
+			if (Kod >= $31) then if (Kod <= $39) then Dal := Kod - $30;
+			if (Kod = $30) then Dal := 10;
+			if (Kod >= $41) then if (Kod <= $43) then Dal := Kod - $40 + 10;
+			if (Kod >= $61) then if (Kod <= $63) then Dal := Kod - $60 + 10;
+			if (Dal > DalSzam[Jatek]) then Dal := 0;
+			if (Kod = $1B) then
+			begin
+				Jatek := 0;
+				Menu();
+			end;
+			if (Dal <> 0) then DalInditas();
+		end;
 	end;
 end.
