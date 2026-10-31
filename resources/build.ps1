@@ -17,7 +17,7 @@ if ($p.ExitCode -ne 0 -or $hibak -or -not (Test-Path $cas) -or (Get-Item $cas).L
 $Lemez2 = @("LNINJA2")
 $lemez = @("SIDSoftEMU.cas=SIDSOFT.CAS")
 $lemez2 = @("SIDSoftEMU.cas=SIDSOFT.CAS")
-Get-ChildItem (Join-Path $Gyoker "sid_tvc") -Directory -ErrorAction SilentlyContinue | ForEach-Object { $d = $_.Name; Get-ChildItem $_.FullName -Filter "*.STC" | ForEach-Object { $e = ("sid_tvc/" + $d + "/" + $_.Name + "=SID_TVC/" + $d + "/" + $_.Name); if ($Lemez2 -contains $d) { $lemez2 += $e } else { $lemez += $e } } }
+Get-ChildItem (Join-Path $Gyoker "sid_tvc") -Directory -ErrorAction SilentlyContinue | ForEach-Object { $d = $_.Name; Get-ChildItem $_.FullName -Filter "*.STC" | Sort-Object { [regex]::Replace($_.Name, '\d+', { $args[0].Value.PadLeft(5, '0') }) } | ForEach-Object { $e = ("sid_tvc/" + $d + "/" + $_.Name + "=SID_TVC/" + $d + "/" + $_.Name); if ($Lemez2 -contains $d) { $lemez2 += $e } else { $lemez += $e } } }
 & (Join-Path $PSScriptRoot "make_dsk.ps1") -Out "SIDSoftEMU.dsk" -Files $lemez | Select-Object -Last 1
 & (Join-Path $PSScriptRoot "make_dsk.ps1") -Out "SIDSOFT2.dsk" -Files $lemez2 | Select-Object -Last 1
 

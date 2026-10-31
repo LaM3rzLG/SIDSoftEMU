@@ -12,7 +12,8 @@ TRSE_PROJEKT=SIDSoftEMU.trse
 LEMEZ2="LNINJA2"
 LEMEZ_FAJLOK="'SIDSoftEMU.cas=SIDSOFT.CAS'"
 LEMEZ2_FAJLOK="'SIDSoftEMU.cas=SIDSOFT.CAS'"
-for f in sid_tvc/*/*.STC; do
+# termeszetes sorrend a lemezen (SONG1, SONG2, ... SONG10): a fajlkezelo a lemez sorrendjeben listaz
+for f in $(ls sid_tvc/*/*.STC 2>/dev/null | sort -V); do
   [ -f "$f" ] || continue
   d="${f#sid_tvc/}"; d="${d%%/*}"
   if [[ " $LEMEZ2 " == *" $d "* ]]; then LEMEZ2_FAJLOK="$LEMEZ2_FAJLOK,'$f=SID_TVC/${f#sid_tvc/}'"

@@ -20,13 +20,14 @@ ugyanazt adja (így a kimenet is bájtra azonos).
 ## Használat
 
 ```
-sid2tvc [-s N | -a] [-o MAPPA] [-n NÉV] [-w] [-f N] [-q] fajl.sid
+sid2tvc [-s N | -a] [-o MAPPA] [-n NÉV] [-w] [-f N] [-m] [-q] fajl.sid
   -s N      aldal (alapértelmezés: a .sid kezdő dala)
   -a        az összes aldal
   -o MAPPA  kimenet: MAPPA/<NÉV>/SONG<n>.STC   (alapértelmezés: SID_TVC)
   -n NÉV    a mappa neve (legfeljebb 8 betű; alapértelmezés: a .sid fájlnevéből)
   -w        WAV-előnézet is, pontosan a TVC hangjával: MAPPA/<NÉV>/SONG<n>.WAV
-  -f N      legfeljebb N képkocka (50/mp; alapértelmezés 30000 = 10 perc)
+  -f N      hurok nélkül legfeljebb N képkocka (50/mp; alapértelmezés 30000 = 10 perc)
+  -m        csak a memória-hurok (a hang ismétlődését nem keresi)
   -q        csak a hibákat írja ki
 ```
 
@@ -38,18 +39,24 @@ A `SID_TVC` mappát változatlan szerkezetben kell a TVC lemezére / SD-kártyá
 
 - **6502-emuláció** a hivatalos és a stabil illegális utasításokkal; PSID és RSID; `play = 0` esetén az
   init által beállított IRQ-rutin ($0314 vagy $FFFE) fut képkockánként.
-- **Hurok:** a dal első pontos ismétlődése (a teljes C64-memória alapján); a TVC-n a dal onnan ismétlődik.
-  Ha 10 percen belül nincs ismétlődés, a dal a végén elölről indul.
+- **Hurok, két módszerrel** (a TVC-n a dal a hurokponttól ismétlődik):
+  1. *memória:* a teljes C64-memória (+ SID-regiszterek) első pontos ismétlődése - biztos, de sok lejátszó
+     közben számlálót léptet, így gyakran nem talál (vagy csak későn);
+  2. *hang:* a hallható TVC-állapot (3 hang: lépésköz, szelet, PW) ismétlődése - a legrövidebb dalt adja
+     (legkisebb hurokpont + hossz). Memória-hurok esetén ez is biztos; ha nincs, a 20 perces mintában legalább
+     2 teljes ismétlés és 30 s egyezés kell hozzá.
+  A kettőből a rövidebb dal nyer (a kiírásban `[memoria]` / `[hang]`). Hurok nélkül 10 perc, aztán elölről;
+  ha a hurok csak 10 perc után jön, és úgy nem fér el, szintén 10 perc.
 - **SID-burkoló (ADSR)** a valódi SID-időzítésekkel; hullámforma, impulzusszélesség, hangerő.
-- **Tömörítés** hangonként (ismétlődő részek visszahivatkozással); a kész dal legfeljebb ~50 KB lehet.
+- **Tömörítés** hangonként (ismétlődő részek visszahivatkozással); a kész dal legfeljebb 52 224 bájt ($2300-$EEFF) lehet.
 - Minden kimenetet visszaellenőriz a TVC lejátszójának pontos mására.
 
 Nem kezeli (egyelőre): többszörös sebességű (CIA-val gyorsított) dalok, digi-hangok, a SID szűrője.
 
 ## A .STC formátum
 
-2 bájt hossz (L), majd a dal `$C000` feletti része, végül a `$2800..$BFFF` rész (így a TVC ROM-jával
-egyszerűen betölthető). A dal `$2800`-tól: 6 bájtos fejléc (a 3 hang folyamának címe), majd hangonként
+2 bájt hossz (L), majd a dal `$C000` feletti része, végül a `$2300..$BFFF` rész (így a TVC ROM-jával
+egyszerűen betölthető). A dal `$2300`-tól: 6 bájtos fejléc (a 3 hang folyamának címe), majd hangonként
 képkockánként egy rekord:
 
 | Kód | Jelentés |

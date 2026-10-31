@@ -26,7 +26,7 @@ Testvérprojektek és minták: `../Ugh`, `../WaterPumpGame`.
   a program kódja és adata csak $0000-$7FFF lehet (most $19EF-$1CA3). `GE::Init` kikapcsolja a firmware IT-t;
   ROM-hívás előtt `GE::EnableTVCITHandler()`.
 - Build: Mac `bash resources/build_mac.sh` (Cmd+Shift+B), Windows `resources\build.ps1`; lemezen: `load"SIDSOFT"`.
-  A `dalok/DAL*.BIN` fájlokat mindkét build magától a lemezre teszi.
+  A `sid_tvc/<NÉV>/*.STC` fájlokat mindkét build magától a lemezre teszi (`SID_TVC\<NÉV>\`).
   A váz az Ugh-ból jött (`tvc_units/`, `resources/kozos.ps1`, `make_dsk.ps1`, `.vscode/tasks.json`).
 
 ## Munkastílus
@@ -59,12 +59,21 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   Próba más dalokkal (HVSC: Hubbard, Galway, Tel): **a legtöbbnek nincs pontos memória-hurka 10 percen belül ->
   58-80 KB, nem fér el -> HUROKKERESÉS a legfontosabb** (pl. a kimenet ismétlődése); Tel "Wizzy": BRK az 1.
   képkockán (vizsgálni); kell `-n NÉV` (a 8 karakteres név ütközhet).
-- **Last Ninja 1-2-3 (2026-10-31, a felhasználó kérése):** `sid/Last_Ninja_{1,2,3}.sid` -> `sid_tvc/LNINJA{1,2,3}/SONGn.STC`
-  (`sid2tvc -a -n LNINJAj -o sid_tvc`), lemezen `SID_TVC\LNINJAj\SONGn.STC`. **A dal kezdete most $2800** (sid2tvc.c
-  SONG_BASE, a .ras Betolt/Lejatszas), max 50 944 B; a program vege $259D (< $2800 kell). 33/34 dal kesz; hianyzik az
-  **LN2 12. dal** (60 KB, nincs memoria-hurka -> hurokkereses kell). Menu: jatek 1-3, aldal 1-9, 0=10, A-C=11-13, ESC = vissza.
-  A dalok ~1 MB-ok -> **ket lemezkep**: `SIDSoftEMU.dsk` (LN1+LN3), `SIDSOFT2.dsk` (LN2; build: LEMEZ2 / $Lemez2).
-  ep128emu-ben kiprobalva: LN1/5 (47 KB) es LN2/4 a memoriaban bajtra egyezik a fajllal, LN3 szol, hianyzo dal = "Nincs ilyen dal!".
+- **Last Ninja 1-2-3 (2026-10-31):** `sid/Last_Ninja_{1,2,3}.sid` -> `sid_tvc/LNINJA{1,2,3}/SONGn.STC`
+  (`sid2tvc -a -n LNINJAj -o sid_tvc`), lemezen `SID_TVC\LNINJAj\SONGn.STC`. 33/34 dal; hiányzik az **LN2 12.** (59 KB).
+  Két lemezkép (~1 MB): `SIDSoftEMU.dsk` (LN1+LN3), `SIDSOFT2.dsk` (LN2; build: LEMEZ2 / $Lemez2); a dalok természetes
+  sorrendben (sort -V) kerülnek fel, mert a fájlkezelő a lemez sorrendjében listáz.
+- **Hurok két módszerrel (2026-10-31, sid2tvc.c `hang_hurok`):** memória-hurok + a hallható TVC-állapot ismétlődése, a
+  rövidebb dal nyer (`[memoria]`/`[hang]` a kiírásban; `-m` = csak memória). Hurok nélküli dalnál 20 percet elemez.
+  Eredmény: 17 dal rövidebb, az LN3 4/7/8/10 kapott hurkot; LN2/12 60,9 -> 59,4 KB, így sem fér el (tömörítés kell).
+- **A dal kezdete $2300 (max 52 224 B) + mini fájlkezelő (2026-10-31, ep128emu-ben kipróbálva):** a régi menü helyett
+  `Fajlkezelo` (asm): a meghajtó könyvtárai a lemez-ROM FISH hívásaival (`rst $30`/`$DB`, FPB; 04H/05H = első/következő
+  keresés), Fel/Le, Balra/Jobbra = lapozás, Enter = könyvtár / .STC, ESC = feljebb; nyílkódok (KBD_CHIN): fel 5, le 24,
+  bal 19, jobb 4. **Memória:** rezidens rész (TVC unit, Betolt, Lejatszas, DalJatszas) vége `RezVege` ($1F61) < $2300
+  KELL; a `RezVege..FkVege` rész (fájlkezelő, ~1,4 KB) lejátszás előtt a VID-be ($8A00, $50 lapozás) mentődik, közben
+  CRTC R6 = 10 (csak a felső 4 szöveges sor látszik), utána vissza. Lista: $6000, FCB-k $7000/$7040, FPB $7080.
+  Kipróbálva: könyvtárváltás, LN1/5 (47 KB) bájtra egyezik, LN3/1, LN2/4 szól, vissza a listába, ESC, nem .STC üzenet.
+  Valódi gépen (SD) a FISH-hívás még NINCS kipróbálva - ha ott nem megy, a lista üres/hibakód.
 - Folytatási ötletek: hangminőség (szűrő közelítése táblával, finomabb szintek/keverés, zaj), 5. aldal
   tömörítése, más .sid-ek kipróbálása, dal neve a fájlból a menüben.
 

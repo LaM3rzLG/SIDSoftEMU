@@ -1,25 +1,25 @@
 program SIDSoftEMU;
 @use "TVC"
 
-/* SIDSoftEMU - SID-lejatszo (2026-10-31): a .sid-bol PC-n keszult dal (tools/sid2tvc -> sid_tvc/<NEV>/SONGn.STC, a lemezen SID_TVC\<NEV>\SONGn.STC)
+/* SIDSoftEMU - SID-lejatszo (2026-10-31): a .sid-bol PC-n keszult dal (tools/sid2tvc -> sid_tvc/<NEV>/SONGn.STC)
    lemezrol, 3 hang 5008 Hz-en ("A" valtozat: hangonkent 0..5 szint, osszeg a port 6-ra).
-   - Menu (a ROM el): jatek 1..3 (Last Ninja 1-3), majd aldal 1..9, 0 = 10, A..C = 11..13 -> SID_TVC\LNINJAj\SONGn.STC
-     betoltese, lejatszas; ESC = vissza a jatekvalasztashoz. Lejatszas kozben barmely gomb = vissza.
+   - Mini fajlkezelo (Fajlkezelo): a meghajto konyvtarai a lemez-ROM FISH hivasaival; Fel/Le, Balra/Jobbra = lapozas,
+     Enter = konyvtar / .STC lejatszasa, ESC = feljebb. Lejatszas kozben barmely gomb = vissza.
    - Betoltes a ROM-mal (Lemmings-sorrend: $0B0A:=0, $D3 nyitas, $D2 olvasas, $D4 zaras). A fajl: 2 byte hossz,
-     aztan a dal $C000 feletti resze (ez $8000-ra jon = U2, onnan U3-ba masoljuk), vegul a $2800-$BFFF resz.
+     aztan a dal $C000 feletti resze (ez $8000-ra jon = U2, onnan U3-ba masoljuk), vegul a $2300-$BFFF resz.
    - Lejatszas: teljes 64K RAM ($B0: U0,U1,U2,U3; a kepet a CRTC a VID-bol mutatja tovabb), tablak $EF00-$FFFF
-     (TablaGen), dal $2800-tol (max 50,9 KB). Sajat IT a $38-on (IM 1); kilepeskor a rendszer-IT visszaall (F5 3E 70, mint GE::EnableTVCITHandler).
+     (TablaGen), dal $2300-tol (max 52 224 B). Sajat IT a $38-on (IM 1); kilepeskor a rendszer-IT visszaall (F5 3E 70, mint GE::EnableTVCITHandler).
    - Hang-IT: 3 fazisszamlalo IX, IY, HL'. Hangonkent 5 byte-os onmodosito res (V1SH..V3SH): tabla
      (ld e,a / ld d,lap / ld a,(de) / nop) vagy negyszog (cp PW / sbc a,a / and AMP). A dekodolo asm-ben.
    - Meres a keretben: IT = PIROS, lejatszo = ZOLD, szabad = FEKETE.
    TILOS a fo programban lejatszas kozben: IX, IY, shadow regiszterek, ROM-hivas.
-   A program vege < $2800 kell legyen (.sym: EndBlock) - a dal kezdete (sid2tvc.c SONG_BASE). */
+   MEMORIA: a REZIDENS resz (valtozok, TVC unit, Betolt, Lejatszas, DalJatszas) vege = RezVege < $2300 kell (.sym)!
+   A RezVege..FkVege resz (a fajlkezelo) a lejatszas alatt a VID-ben ($8A00-tol) var; ami utana jon (foprogram,
+   TVC unit, TRSE konyvtar), az lejatszas utan mar nem kell. (Az OrgAsm ket elore hivatkozott cimke kulonbseget 0-nak szamolja -> DjHossz futas kozben.) */
 
 var
 	SidZaj		:	incbin("resources/sid_zaj.bin");		/* zaj-alak: 256 x 0..15 (a TablaGen-hez) */
-	Fajlnev		:	array[28] of byte = (25, $53, $49, $44, $5F, $54, $56, $43, $5C, $4C, $4E, $49, $4E, $4A, $41, $31, $5C, $53, $4F, $4E, $47, $31, $2E, $53, $54, $43, 0, 0);	/* "SID_TVC\LNINJA1\SONG1.STC": a jatek a 15., az aldal a 21. (22.) byte-tol */
-	DalSzam		:	array[4] of byte = (0, 11, 13, 10);	/* aldalak szama jatekonkent */
-	Kod, Dal, Hiba, Jatek, Poz	:	byte;
+	Hiba	:	byte;
 	/* atalakitas: hiba (0 jo, 1 6502, 2 tul sok lap), figyelmeztetes */
 
 
@@ -30,7 +30,7 @@ begin
 		xor	a
 		ld	(Hiba),a
 		ld	($0B0A),a
-		ld	de,Fajlnev
+		ld	de,FkFajl
 		rst	$30
 		db	$D3					;	CAS_OPEN, Z = ok
 		jr	z,BtNyitva
@@ -43,7 +43,7 @@ begin
 		rst	$30
 		db	$D2					;	CAS_BKIN
 		ld	hl,(BtHossz)
-		ld	de,$C000-$2800		;	a $2800-$BFFF resz hossza
+		ld	de,$C000-$2300		;	a $2300-$BFFF resz hossza
 		or	a
 		sbc	hl,de
 		jr	c,BtKicsi
@@ -65,12 +65,12 @@ begin
 		ld	a,($0003)
 		out	($02),a
 		ei
-		ld	bc,$C000-$2800
+		ld	bc,$C000-$2300
 		jr	BtFo
 	BtKicsi:
 		ld	bc,(BtHossz)
 	BtFo:
-		ld	de,$2800
+		ld	de,$2300
 		rst	$30
 		db	$D2
 		xor	a
@@ -112,11 +112,11 @@ begin
 		ld	(hl),0
 		inc	hl
 		djnz	LjTorl
-		ld	hl,($2800)
+		ld	hl,($2300)
 		ld	(DkAll),hl
-		ld	hl,($2802)
+		ld	hl,($2302)
 		ld	(DkAll+10),hl
-		ld	hl,($2804)
+		ld	hl,($2304)
 		ld	(DkAll+20),hl
 		ld	a,128
 		ld	(DkAll+9),a
@@ -600,109 +600,751 @@ begin
 	");
 end;
 
-/* ---------------------------------------------------------------- menu: Jatek = 0 -> jatekvalasztas, kulonben az aldalak */
-procedure Menu();
+/* ---------------------------------------------------------------- dal lejatszasa a fajlkezelobol (REZIDENS: a RezVege elott kell lennie)
+   A dal $2300-tol tolt, ez felulirja a program felso reszet (a fajlkezelot: RezVege..FkVege).
+   Ezert elotte ezt a reszt a kepmemoriaba (VID $0A00-tol = $8A00, $50 lapozassal) mentjuk, a kepbol csak a
+   felso 4 szoveges sor latszik (CRTC R6 = 10 karaktersor = $0000-$09FF), a vegen visszamasoljuk. A fajlnev: FkFajl. */
+procedure DalJatszas();
 begin
-	TVC::Cls();
-	TVC::WriteAt(2, 2, "SIDSoftEMU - SID a TVC-n");
-	if (Jatek = 0) then
-	begin
-		TVC::WriteAt(2, 4, "1 = The Last Ninja (1987)");
-		TVC::WriteAt(6, 5, "Ben Daglish, Anthony Lees");
-		TVC::WriteAt(2, 6, "2 = Last Ninja 2 (1988)");
-		TVC::WriteAt(6, 7, "Matt Gray");
-		TVC::WriteAt(2, 8, "3 = Last Ninja 3 (1991)");
-		TVC::WriteAt(6, 9, "Reyn Ouwehand");
-	end;
-	if (Jatek = 1) then
-	begin
-		TVC::WriteAt(2, 4, "The Last Ninja (1987)");
-		TVC::WriteAt(2, 5, "Ben Daglish, Anthony Lees");
-		TVC::WriteAt(2, 8, "Aldal: 1-9, 0 = 10, A = 11");
-	end;
-	if (Jatek = 2) then
-	begin
-		TVC::WriteAt(2, 4, "Last Ninja 2 (1988)");
-		TVC::WriteAt(2, 5, "Matt Gray");
-		TVC::WriteAt(2, 8, "Aldal: 1-9, 0=10, A-C=11-13");
-	end;
-	if (Jatek = 3) then
-	begin
-		TVC::WriteAt(2, 4, "Last Ninja 3 (1991)");
-		TVC::WriteAt(2, 5, "Reyn Ouwehand");
-		TVC::WriteAt(2, 8, "Aldal: 1-9, 0 = 10");
-	end;
-	if (Jatek <> 0) then TVC::WriteAt(2, 9, "ESC = masik jatek");
-	TVC::WriteAt(2, 11, "Lejatszas kozben:");
-	TVC::WriteAt(2, 12, "barmely gomb = vissza");
-	TVC::WriteAt(2, 14, "Keret: piros = hang-IT,");
-	TVC::WriteAt(2, 15, "zold = lejatszo");
+	asm("
+		call	DjMent
+		ld	a,6					;	CRTC R6: csak a felso 4 szoveges sor latszik
+		out	($70),a
+		ld	a,10
+		out	($71),a
+		call	Betolt
+		ld	a,(Hiba)
+		or	a
+		jr	nz,DjVissza
+		call	Lejatszas
+	DjVissza:
+		call	DjTolt
+		ld	a,6
+		out	($70),a
+		ld	a,60
+		out	($71),a
+		ret
+	DjMent:
+		di
+		ld	a,$50				;	U0,U1,VID,SYS
+		out	($02),a
+		call	DjHossz
+		ld	hl,RezVege
+		ld	de,$8A00
+		ldir
+		ld	a,($0003)
+		out	($02),a
+		ei
+		ret
+	DjTolt:
+		di
+		ld	a,$50
+		out	($02),a
+		call	DjHossz
+		ld	hl,$8A00
+		ld	de,RezVege
+		ldir
+		ld	a,($0003)
+		out	($02),a
+		ei
+		ret
+	DjHossz:						;	BC = FkVege - RezVege (az OrgAsm elore hivatkozott cimkek kulonbseget 0-nak szamolja!)
+		ld	hl,FkVege
+		ld	de,RezVege
+		or	a
+		sbc	hl,de
+		ld	b,h
+		ld	c,l
+		ret
+	RezVege:
+	");
 end;
 
-/* ---------------------------------------------------------------- a kivalasztott aldal: betoltes (SID_TVC\LNINJAj\SONGn.STC), lejatszas */
-procedure DalInditas();
+/* ================================================================ innen NEM rezidens (lejatszas alatt a VID-ben van) */
+
+/* ---------------------------------------------------------------- mini fajlkezelo
+   A meghajto konyvtarat a lemez-ROM FISH hivasaival olvassa (MOPS: rst $30 / $DB, DE = FPB {IX, HL, DE, BC},
+   C = FISH-kod; 04H = elso keresese, 05H = kovetkezo keresese; VT-DOS floppy kezikonyv 5.2.9, 5.3.4.7-8).
+   Fel/Le = valasztas, Balra/Jobbra = lapozas, Enter = konyvtarba be / .STC lejatszasa, ESC = egy szinttel feljebb.
+   Lista: FkLISTA ($6000, 16 byte/bejegyzes: nev 8, kit. 3, attr 1, meret 4), FCB-k $7000/$7040, FPB $7080. */
+procedure Fajlkezelo();
 begin
-	Fajlnev[15] := $30 + Jatek;
-	Poz := 21;
-	if (Dal < 10) then
-	begin
-		Fajlnev[Poz] := $30 + Dal;
-	end
-	else
-	begin
-		Fajlnev[Poz] := $31;
-		Poz := Poz + 1;
-		Fajlnev[Poz] := $30 + Dal - 10;
-	end;
-	Poz := Poz + 1;
-	Fajlnev[Poz] := $2E;
-	Poz := Poz + 1;
-	Fajlnev[Poz] := $53;
-	Poz := Poz + 1;
-	Fajlnev[Poz] := $54;
-	Poz := Poz + 1;
-	Fajlnev[Poz] := $43;
-	Fajlnev[0] := Poz;
-	TVC::WriteAt(2, 18, "Betoltes...         ");
-	Betolt();
-	if (Hiba <> 0) then TVC::WriteAt(2, 18, "Nincs ilyen dal!    ");
-	if (Hiba = 0) then
-	begin
-		TVC::WriteAt(2, 18, "Szol                ");
-		Lejatszas();
-		Menu();
-	end;
+	asm("
+FkLISTA		equ	$6000
+FkFCB1		equ	$7000
+FkFCB2		equ	$7040
+FkFPB		equ	$7080
+FkLATHATO	equ	18
+FkKFEL		equ	5
+FkKLE		equ	24
+FkKBAL		equ	19
+FkKJOBB		equ	4
+
+		call	FkOlvas
+	FkUjra:
+		call	FkRajz
+	FkBill:
+		rst	$30
+		db	$91					;	KBD_CHIN -> C
+		ld	a,c
+		cp	$1B
+		jp	z,FkSzulo
+		cp	$0D
+		jp	z,FkEnter
+		cp	FkKFEL
+		jp	z,FkFel
+		cp	FkKLE
+		jp	z,FkLe
+		cp	FkKBAL
+		jp	z,FkLapFel
+		cp	FkKJOBB
+		jp	z,FkLapLe
+		jp	FkBill				;	mas gomb: semmi
+
+	;	------------------------------------------------ mozgas
+	FkFel:
+		ld	a,(FkSel)
+		or	a
+		jp	z,FkBill
+		dec	a
+		jp	FkUjSel
+	FkLe:
+		ld	a,(FkSel)
+		inc	a
+		ld	hl,FkDb
+		cp	(hl)
+		jp	nc,FkBill
+		jp	FkUjSel
+	FkLapFel:
+		ld	a,(FkSel)
+		sub	FkLATHATO
+		jp	nc,FkUjSel
+		xor	a
+		jp	FkUjSel
+	FkLapLe:
+		ld	a,(FkDb)
+		or	a
+		jp	z,FkBill
+		dec	a
+		ld	b,a					;	B = utolso
+		ld	a,(FkSel)
+		add	a,FkLATHATO
+		jr	c,FkLL1
+		cp	b
+		jp	c,FkUjSel
+	FkLL1:
+		ld	a,b
+	FkUjSel:
+		ld	b,a
+		ld	a,(FkSel)
+		ld	(FkRegi),a
+		ld	a,b
+		ld	(FkSel),a
+		ld	hl,FkTop
+		cp	(hl)
+		jr	c,FkGorgFel
+		sub	(hl)
+		cp	FkLATHATO
+		jr	nc,FkGorgLe
+		ld	a,(FkRegi)			;	gorgetes nelkul: csak a jelek
+		ld	hl,FkTop
+		sub	(hl)
+		add	a,4
+		ld	c,a
+		ld	a,$20
+		call	FkJel
+		ld	a,(FkSel)
+		ld	hl,FkTop
+		sub	(hl)
+		add	a,4
+		ld	c,a
+		ld	a,$3E
+		call	FkJel
+		jp	FkBill
+	FkGorgFel:
+		ld	a,(FkSel)
+		ld	(FkTop),a
+		call	FkLista
+		jp	FkBill
+	FkGorgLe:
+		ld	a,(FkSel)
+		sub	FkLATHATO-1
+		ld	(FkTop),a
+		call	FkLista
+		jp	FkBill
+
+	;	------------------------------------------------ Enter
+	FkEnter:
+		ld	a,(FkDb)
+		or	a
+		jp	z,FkBill
+		ld	a,(FkSel)
+		call	FkCim				;	HL = bejegyzes
+		ld	a,(hl)
+		cp	$2E					;	. vagy ..
+		jr	nz,FkEn1
+		inc	hl
+		ld	a,(hl)
+		cp	$2E
+		jp	z,FkSzulo
+		jp	FkBill
+	FkEn1:
+		push	hl
+		ld	de,11
+		add	hl,de
+		ld	a,(hl)
+		pop	hl
+		and	$10
+		jr	z,FkEnFajl
+		;	konyvtar: hozzafuzes az uthoz
+		ld	a,(FkUtHossz)
+		cp	50
+		jp	nc,FkBill
+		ld	de,FkUt
+		call	FkUtVege			;	DE = a lezaro 0
+		ld	a,(FkUtHossz)
+		cp	1
+		jr	z,FkEn2				;	gyoker: nem kell \
+		ld	a,$5C
+		ld	(de),a
+		inc	de
+	FkEn2:
+		call	FkNevMasol			;	HL bejegyzes -> DE (nev.kit), DE = vege
+		xor	a
+		ld	(de),a
+		call	FkUtHosszSzamol
+		jp	FkUjKonyvtar
+	FkEnFajl:
+		push	hl
+		ld	de,8
+		add	hl,de
+		ld	a,(hl)
+		cp	$53					;	S
+		jr	nz,FkNemStc
+		inc	hl
+		ld	a,(hl)
+		cp	$54					;	T
+		jr	nz,FkNemStc
+		inc	hl
+		ld	a,(hl)
+		cp	$43					;	C
+		jr	nz,FkNemStc
+		pop	hl
+		jp	FkJatszik
+	FkNemStc:
+		pop	hl
+		ld	hl,FkSzNemStc
+		call	FkAllapot
+		jp	FkBill
+
+	;	------------------------------------------------ ESC: egy szinttel feljebb
+	FkSzulo:
+		ld	a,(FkUtHossz)
+		cp	2
+		jp	c,FkBill			;	gyoker
+		ld	hl,FkUt
+		ld	b,0
+		ld	c,a
+		add	hl,bc				;	HL = a lezaro 0
+	FkSz1:
+		dec	hl
+		ld	a,(hl)
+		cp	$5C
+		jr	nz,FkSz1
+		ld	de,FkUt
+		or	a
+		sbc	hl,de
+		jr	nz,FkSz2
+		inc	hl					;	az elso \ (gyoker) marad
+	FkSz2:
+		add	hl,de
+		ld	(hl),0
+		call	FkUtHosszSzamol
+	FkUjKonyvtar:
+		xor	a
+		ld	(FkSel),a
+		ld	(FkTop),a
+		call	FkOlvas
+		jp	FkUjra
+
+	;	------------------------------------------------ lejatszas
+	FkJatszik:
+		ld	de,FkNevKi			;	a nev (kiirashoz es a fajlnevhez)
+		call	FkNevMasol
+		xor	a
+		ld	(de),a
+		ld	de,FkFajl+1			;	FkFajl = hossz + ut + \ + nev
+		ld	hl,FkUt
+		call	FkMasol0
+		ld	a,(FkUtHossz)
+		cp	1
+		jr	z,FkJ1
+		ld	a,$5C
+		ld	(de),a
+		inc	de
+	FkJ1:
+		ld	hl,FkNevKi
+		call	FkMasol0
+		ld	h,d
+		ld	l,e
+		ld	de,FkFajl+1
+		or	a
+		sbc	hl,de
+		ld	a,l
+		ld	(FkFajl),a
+		ld	bc,$0203
+		ld	hl,FkSzSzol
+		call	FkKiir
+		ld	bc,$0803
+		ld	hl,FkNevKi
+		call	FkKiir
+		ld	bc,$0204
+		ld	hl,FkSzKeret
+		call	FkKiir
+		ld	bc,$0101			;	a kurzor a lathato reszben legyen
+		rst	$30
+		db	$03
+		call	DalJatszas
+		ld	a,(Hiba)
+		push	af
+	FkElenged:
+		call	BillAny				;	a lejatszast leallito gomb ne jusson a fajlkezelohoz
+		jr	nz,FkElenged
+		call	FkOlvas
+		call	FkRajz
+		pop	af
+		or	a
+		jp	z,FkBill
+		ld	hl,FkSzHiba
+		call	FkAllapot
+		jp	FkBill
+
+	;	------------------------------------------------ konyvtar beolvasasa -> FkLISTA, FkDb
+	FkOlvas:
+		xor	a
+		ld	(FkDb),a
+		ld	hl,FkFCB1
+		ld	(hl),$FF
+		inc	hl
+		ld	b,7
+	FkO1:
+		ld	(hl),0				;	1..5 = 0, 6 = keresesi attributum, 7 = meghajto (alapert.)
+		inc	hl
+		djnz	FkO1
+		ld	b,11
+	FkO2:
+		ld	(hl),$3F			;	????????.???
+		inc	hl
+		djnz	FkO2
+		ld	hl,FkUt
+		ld	(FkFPB+2),hl
+		ld	c,4					;	elso keresese
+	FkOHiv:
+		ld	hl,0
+		ld	(FkFPB),hl
+		ld	hl,FkFCB1
+		ld	(FkFPB+4),hl
+		ld	hl,FkFCB2
+		ld	(FkFPB+6),hl
+		ld	de,FkFPB
+		rst	$30
+		db	$DB					;	FISH-funkcio vegrehajtasa
+		ld	(FkHibaKod),a
+		or	a
+		jr	nz,FkOVege
+		ld	a,(FkFCB2+8)		;	a . bejegyzest kihagyjuk
+		cp	$2E
+		jr	nz,FkO3
+		ld	a,(FkFCB2+9)
+		cp	$20
+		jr	z,FkOKov
+	FkO3:
+		ld	a,(FkDb)
+		call	FkCim
+		ex	de,hl
+		ld	hl,FkFCB2+8
+		ld	bc,12				;	nev, kit., attributum
+		ldir
+		ld	hl,FkFCB2+36		;	meret
+		ld	bc,4
+		ldir
+		ld	a,(FkDb)
+		inc	a
+		ld	(FkDb),a
+		cp	255
+		jr	z,FkOVege
+	FkOKov:
+		ld	c,5					;	kovetkezo keresese
+		jr	FkOHiv
+	FkOVege:
+		ld	a,(FkDb)			;	a kijeloles a listan belul maradjon
+		ld	b,a
+		ld	a,(FkSel)
+		cp	b
+		ret	c
+		xor	a
+		ld	(FkSel),a
+		ld	(FkTop),a
+		ret
+
+	;	------------------------------------------------ kepernyo
+	FkRajz:
+		rst	$30
+		db	$05					;	CLS
+		ld	bc,$0201
+		ld	hl,FkSzCim
+		call	FkKiir
+		ld	bc,$0202
+		ld	hl,FkUt
+		call	FkKiir
+		ld	bc,$0217
+		ld	hl,FkSzSugo1
+		call	FkKiir
+		ld	bc,$0218
+		ld	hl,FkSzSugo2
+		call	FkKiir
+	FkLista:
+		xor	a
+		ld	(FkI),a
+	FkL1:
+		ld	a,(FkTop)
+		ld	b,a
+		ld	a,(FkI)
+		add	a,b
+		jr	c,FkLUres
+		ld	hl,FkDb
+		cp	(hl)
+		jr	nc,FkLUres
+		call	FkSorEpit
+		jr	FkL2
+	FkLUres:
+		ld	hl,FkSor
+		ld	b,30
+	FkLU1:
+		ld	(hl),$20
+		inc	hl
+		djnz	FkLU1
+		ld	(hl),0
+	FkL2:
+		ld	a,(FkI)
+		add	a,4
+		ld	c,a
+		ld	b,2
+		ld	hl,FkSor
+		call	FkKiir
+		ld	a,(FkI)
+		inc	a
+		ld	(FkI),a
+		cp	FkLATHATO
+		jr	c,FkL1
+		ld	a,(FkDb)
+		or	a
+		ret	nz
+		ld	l,a					;	ures konyvtar / hiba: a kod
+		ld	a,(FkHibaKod)
+		ld	l,a
+		ld	h,0
+		ld	de,FkSzUres+15
+		call	FkDec
+		ld	bc,$0304
+		ld	hl,FkSzUres
+		jp	FkKiir
+
+	;	A = bejegyzes -> FkSor (30 karakter + 0): jel, nev.kit, meret / <KONYVTAR>
+	FkSorEpit:
+		ld	b,a
+		ld	hl,FkSor
+		push	hl
+		ld	c,31
+	FkSE0:
+		ld	(hl),$20
+		inc	hl
+		dec	c
+		jr	nz,FkSE0
+		dec	hl
+		ld	(hl),0
+		pop	de
+		ld	a,(FkSel)
+		cp	b
+		jr	nz,FkSE1
+		ld	a,$3E
+		ld	(de),a
+	FkSE1:
+		inc	de
+		ld	a,b
+		call	FkCim
+		push	hl
+		call	FkNevMasol
+		pop	hl
+		ld	de,11
+		add	hl,de
+		ld	a,(hl)
+		and	$10
+		jr	z,FkSE2
+		ld	hl,FkSzKvt
+		ld	de,FkSor+16
+		ld	bc,10
+		ldir
+		ret
+	FkSE2:
+		inc	hl					;	meret: KB = felfele kerekitve (meret >> 10)
+		ld	a,(hl)				;	b0
+		inc	hl
+		ld	e,(hl)				;	b1
+		inc	hl
+		ld	d,(hl)				;	b2
+		inc	hl
+		ld	c,(hl)				;	b3
+		ld	b,a
+		ld	a,e
+		and	3
+		or	b
+		ld	b,a					;	B <> 0 -> kerekites
+		srl	c
+		rr	d
+		rr	e
+		srl	c
+		rr	d
+		rr	e
+		ld	a,b
+		or	a
+		jr	z,FkSE3
+		inc	de
+	FkSE3:
+		ex	de,hl
+		ld	de,FkSor+16
+		call	FkDec
+		ld	hl,FkSor+22
+		ld	(hl),$4B			;	KB
+		inc	hl
+		ld	(hl),$42
+		ret
+
+	;	HL = bejegyzes; nev (szokozok nelkul) + . + kiterjesztes -> DE; vissza: DE = vege
+	FkNevMasol:
+		ld	b,8
+	FkNM1:
+		ld	a,(hl)
+		inc	hl
+		cp	$20
+		jr	z,FkNM2
+		ld	(de),a
+		inc	de
+	FkNM2:
+		djnz	FkNM1
+		ld	a,(hl)
+		cp	$20
+		ret	z
+		ld	a,$2E
+		ld	(de),a
+		inc	de
+		ld	b,3
+	FkNM3:
+		ld	a,(hl)
+		inc	hl
+		cp	$20
+		jr	z,FkNM4
+		ld	(de),a
+		inc	de
+	FkNM4:
+		djnz	FkNM3
+		ret
+
+	;	A = index -> HL = FkLISTA + 16 * A
+	FkCim:
+		push	de
+		ld	l,a
+		ld	h,0
+		add	hl,hl
+		add	hl,hl
+		add	hl,hl
+		add	hl,hl
+		ld	de,FkLISTA
+		add	hl,de
+		pop	de
+		ret
+
+	;	HL = 0-val zart szoveg -> DE (a 0 nelkul); vissza: DE = vege
+	FkMasol0:
+		ld	a,(hl)
+		or	a
+		ret	z
+		ld	(de),a
+		inc	hl
+		inc	de
+		jr	FkMasol0
+
+	;	DE = string -> DE = a lezaro 0
+	FkUtVege:
+		ld	a,(de)
+		or	a
+		ret	z
+		inc	de
+		jr	FkUtVege
+
+	FkUtHosszSzamol:
+		ld	de,FkUt
+		call	FkUtVege
+		ld	h,d					;	NEM ld hl,X + ex de,hl: a TRSE optimalizaloja ld de,X-re rontja!
+		ld	l,e
+		ld	de,FkUt
+		or	a
+		sbc	hl,de
+		ld	a,l
+		ld	(FkUtHossz),a
+		ret
+
+	;	HL = szam -> DE-tol 5 karakter, vezeto szokozokkel
+	FkDec:
+		push	ix
+		ld	b,0					;	B = volt mar nem 0 szamjegy
+		ld	ix,FkDecTab
+		ld	c,5
+	FkD1:
+		push	bc
+		ld	c,(ix+0)
+		ld	b,(ix+1)
+		ld	a,$2F
+	FkD2:
+		inc	a
+		or	a
+		sbc	hl,bc
+		jr	nc,FkD2
+		add	hl,bc
+		pop	bc
+		cp	$30
+		jr	nz,FkD3
+		ld	a,b
+		or	a
+		ld	a,$30
+		jr	nz,FkD3
+		ld	a,c
+		cp	1
+		ld	a,$30
+		jr	z,FkD3
+		ld	a,$20
+		jr	FkD4
+	FkD3:
+		ld	b,1
+	FkD4:
+		ld	(de),a
+		inc	de
+		inc	ix
+		inc	ix
+		dec	c
+		jr	nz,FkD1
+		pop	ix
+		ret
+	FkDecTab:
+		dw	10000,1000,100,10,1
+
+	;	B = oszlop, C = sor, HL = 0-val zart szoveg
+	FkKiir:
+		push	hl
+		rst	$30
+		db	$03					;	pozicio
+		pop	hl
+		ld	d,h
+		ld	e,l
+		ld	bc,0
+	FkK1:
+		ld	a,(hl)
+		or	a
+		jr	z,FkK2
+		inc	hl
+		inc	bc
+		jr	FkK1
+	FkK2:
+		ld	a,b
+		or	c
+		ret	z
+		rst	$30
+		db	$02					;	szoveg ki
+		ret
+
+	;	A = karakter, C = sor -> a 2. oszlopba
+	FkJel:
+		ld	(FkJelSz),a
+		ld	b,2
+		ld	hl,FkJelSz
+		jp	FkKiir
+
+	;	HL = szoveg -> az allapotsorba (21. sor)
+	FkAllapot:
+		push	hl
+		ld	bc,$0215
+		ld	hl,FkSzTorol
+		call	FkKiir
+		pop	hl
+		ld	bc,$0215
+		jp	FkKiir
+
+	FkSel:
+		db	0
+	FkTop:
+		db	0
+	FkDb:
+		db	0
+	FkRegi:
+		db	0
+	FkI:
+		db	0
+	FkHibaKod:
+		db	0
+	FkJelSz:
+		db	0,0
+	FkUtHossz:
+		db	1
+	FkUt:
+		db	$5C,0
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	FkFajl:
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	FkNevKi:
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	FkSor:
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	FkSzCim:
+		db	$53,$49,$44,$53,$6F,$66,$74,$45,$4D,$55,$20,$2D,$20,$66,$61,$6A,$6C,$6B,$65,$7A,$65,$6C,$6F,0
+	FkSzSugo1:
+		db	$46,$65,$6C,$2F,$4C,$65,$2C,$20,$42,$61,$6C,$72,$61,$2F,$4A,$6F,$62,$62,$72,$61,$3D,$6C,$61,$70,$6F,$7A,$61,$73,0
+	FkSzSugo2:
+		db	$45,$6E,$74,$65,$72,$3D,$6E,$79,$69,$74,$2F,$73,$7A,$6F,$6C,$2C,$20,$45,$53,$43,$3D,$76,$69,$73,$73,$7A,$61,0
+	FkSzSzol:
+		db	$53,$7A,$6F,$6C,$3A,0
+	FkSzKeret:
+		db	$4B,$65,$72,$65,$74,$3A,$20,$70,$69,$72,$6F,$73,$3D,$49,$54,$2C,$20,$7A,$6F,$6C,$64,$3D,$6C,$65,$6A,$61,$74,$73,$7A,$6F,0
+	FkSzKvt:
+		db	$3C,$4B,$4F,$4E,$59,$56,$54,$41,$52,$3E,0
+	FkSzNemStc:
+		db	$43,$73,$61,$6B,$20,$2E,$53,$54,$43,$20,$66,$61,$6A,$6C,$20,$6A,$61,$74,$73,$7A,$68,$61,$74,$6F,0
+	FkSzHiba:
+		db	$48,$69,$62,$61,$20,$61,$20,$62,$65,$74,$6F,$6C,$74,$65,$73,$6B,$6F,$72,$21,0
+	FkSzUres:
+		db	$28,$75,$72,$65,$73,$29,$20,$68,$69,$62,$61,$3A,$20,$20,$20,$20,$20,$20,0
+	FkSzTorol:
+		db	$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,$20,0
+	FkVege:
+	");
 end;
 
+/* ---------------------------------------------------------------- foprogram */
 begin
 	TVC::SetGraphicsMode(TVC::GRAPHICS4);	/* a hang-IT a port 6-ra GR4 modbitet (1) ir */
-	Jatek := 0;
-	Menu();
-	while (true) do
+	Hiba := 0;
+	if (Hiba = 77) then					/* sosem igaz: csak hogy a TRSE ne dobja ki az asm-bol hivott eljarasokat */
 	begin
-		Kod := TVC::ReadKey();
-		if (Jatek = 0) then
-		begin
-			if (Kod >= $31) then if (Kod <= $33) then
-			begin
-				Jatek := Kod - $30;
-				Menu();
-			end;
-		end
-		else
-		begin
-			Dal := 0;
-			if (Kod >= $31) then if (Kod <= $39) then Dal := Kod - $30;
-			if (Kod = $30) then Dal := 10;
-			if (Kod >= $41) then if (Kod <= $43) then Dal := Kod - $40 + 10;
-			if (Kod >= $61) then if (Kod <= $63) then Dal := Kod - $60 + 10;
-			if (Dal > DalSzam[Jatek]) then Dal := 0;
-			if (Kod = $1B) then
-			begin
-				Jatek := 0;
-				Menu();
-			end;
-			if (Dal <> 0) then DalInditas();
-		end;
+		Betolt();
+		Lejatszas();
+		DalJatszas();
 	end;
+	Fajlkezelo();
 end.

@@ -8,14 +8,17 @@
  *     -o MAPPA    kimeneti mappa (alapertelmezes: SID_TVC); a dal: MAPPA/<NEV>/SONG<n>.STC
  *     -n NEV      a mappa neve (alapertelmezes: a .sid fajlnevebol, 8 betu)
  *     -w          WAV elonezet is (pontosan ugy, ahogy a TVC-n szol): MAPPA/<NEV>/<nn>.WAV
- *     -f N        legfeljebb N kepkocka (50/mp, alapertelmezes 30000 = 10 perc)
+ *     -f N        hurok nelkul legfeljebb N kepkocka (50/mp, alapertelmezes 30000 = 10 perc)
+ *     -m          csak a memoria-hurok (a hang ismetlodeset nem keresi)
  *     -q          csendes (csak hibak)
  *
  * Lepesek (ugyanaz, mint a tools/sid2tvc.py referencia; a Last Ninja-n bajtra egyezik vele):
- *   1. 6502-emulacio: a dal init es play rutinja kepkockankent, a SID-irasok naplozva; a hurok = a teljes
- *      memoria (+ SID-regiszterek) elso ismetlodese.
+ *   1. 6502-emulacio: a dal init es play rutinja kepkockankent, a SID-irasok naplozva; memoria-hurok = a teljes
+ *      memoria (+ SID-regiszterek) elso ismetlodese (legfeljebb 2 x -f kepkockaig).
  *   2. SID-burkolo (ADSR) a valodi SID-idozitesekkel, fel kepkockanal mintavetelezve.
  *   3. TVC-allapot hangonkent: lepeskoz (5008 Hz-es hang-IT), szelet (hullam + szint 0..5 / negyszog), PW.
+ *      Hang-hurok: a hallhato allapot ismetlodese (rovidebb lehet a memoria-huroknal, vagy ott is talal,
+ *      ahol a memoria sosem ismetlodik); a kettobol a rovidebb dal nyer.
  *   4. Tomorites hangonkent (rekord / varakozas / REF visszahivatkozas), a hurokpontra ugro VEGE-vel.
  *
  * A .STC formatum: 2 byte hossz (L), majd a dal $C000 feletti resze, vegul a SONG_BASE..$BFFF resz.
@@ -44,7 +47,7 @@
 #define VERZIO "1.0"
 
 /* ------------------------------------------------------------------ TVC-oldali allandok */
-#define SONG_BASE   0x2800              /* a dal cime a TVC-n */
+#define SONG_BASE   0x2300              /* a dal cime a TVC-n */
 #define TABLE_BASE  0xEF00              /* a hangtablak (a TVC generalja) */
 #define SONG_MAX    (TABLE_BASE - SONG_BASE)
 #define IT_PER_FRAME 100
@@ -642,6 +645,46 @@ static All *tvc_allapotok(const Dump *dp)
     return T;
 }
 
+/* ================================================================== 3b. hurok a HANGBOL (a TVC-allapot ismetlodese)
+   A memoria-hurok (1. lepes) csak akkor talal, ha a teljes C64-memoria pontosan ismetlodik; sok lejatszo
+   kozben szamlalot leptet, igy a hang mar ismetlodik, a memoria meg nem. Itt azt keressuk, ahol a hallhato
+   allapot (3 hang: lepes, szelet, PW) ismetlodik: a legkisebb L + P, amire T[f] = T[f + P] minden f >= L-re.
+   - Ha van memoria-hurok: a dal attol fogva pontosan periodikus, ezert a sorozatot kiterjesztjuk (a hurok
+     masodik koreig), es az eredmeny biztos (a legkisebb periodus a memoria-periodus osztoja).
+   - Ha nincs: csak a 10 perces mintabol dontunk, ezert legalabb 2 teljes ismetles es 30 s egyezes kell
+     (kulonben egy kitartott hang a vegen hamis hurkot adna).
+   Eredmeny: *pN = L + P (ennyi kepkockat kodolunk), *pLoop = L; 1, ha rovidebb lett, mint a memoria szerint. */
+static int frame_eq(const All *T, int a, int b)
+{
+    return all_eq(T[a * 3], T[b * 3]) && all_eq(T[a * 3 + 1], T[b * 3 + 1]) && all_eq(T[a * 3 + 2], T[b * 3 + 2]);
+}
+
+static int hang_hurok(const All *T, int *pN, int *pLoop)
+{
+    int N = *pN, Lm = *pLoop, Next, minfarok, P, f;
+    int best = N, bestL = Lm;
+    All *E;
+    if (Lm >= 0) { int Pm = N - Lm; Next = Lm + 2 * Pm; minfarok = 0; }
+    else { Next = N; minfarok = 1500; }
+    E = xmalloc(sizeof(All) * 3 * (Next + 1));
+    for (f = 0; f < Next; f++) {
+        int src = f < N ? f : Lm + (f - N);
+        memcpy(&E[f * 3], &T[src * 3], sizeof(All) * 3);
+    }
+    for (P = 1; P <= Next / 2; P++) {
+        int L, farok;
+        f = Next - P - 1;
+        while (f >= 0 && frame_eq(E, f, f + P)) f--;
+        L = f + 1;
+        farok = Next - L;
+        if (farok < 2 * P || farok < minfarok) continue;
+        if (L + P < best) { best = L + P; bestL = L; }
+    }
+    free(E);
+    if (best < N || (Lm < 0 && bestL >= 0)) { *pN = best; *pLoop = bestL; return 1; }
+    return 0;
+}
+
 /* ================================================================== 4. kodolas (a sid2tvc.py encode_voice masa) */
 typedef struct { uint8_t *b; int n, cap; } Buf;
 static void bput(Buf *b, int v)
@@ -874,6 +917,7 @@ static int wav_ir(const char *path, const All *T, int nfr)
 
 /* ================================================================== egy aldal */
 static const char *nev_kapcsolo = NULL;     /* -n NEV */
+static int csak_mem = 0;                    /* -m: csak a memoria-hurok (a regi viselkedes) */
 
 static void tvc_nev(const char *path, char *nev)
 {
@@ -904,20 +948,29 @@ static int aldal(const SidFajl *s, const char *path, int song, const char *outdi
     Dump dp;
     All *T, *Tv;
     Buf blob = {0};
-    int v, k, nref = 0, starts[3], f;
+    int v, k, nref = 0, starts[3], f, mem_n, mem_loop, hang = 0;
     char hiba[256] = "", nev[16], mappa[1024], fajl[1100];
     FILE *fo;
-    if (!dump(s, song, maxf, &dp, hiba)) {
+    if (!dump(s, song, csak_mem ? maxf : 2 * maxf, &dp, hiba)) {
         fprintf(stderr, "%s, %d. aldal: %s\n", path, song, hiba);
         return 0;
     }
     T = tvc_allapotok(&dp);
-    for (k = 0; k < 6; k++) bput(&blob, 0);
+    mem_n = dp.n; mem_loop = dp.loop;
+    if (!csak_mem) hang = hang_hurok(T, &dp.n, &dp.loop);
+    if (dp.loop < 0 && dp.n > maxf) dp.n = maxf;      /* hurok nelkul legfeljebb maxf kepkocka (aztan elolrol) */
     Tv = xmalloc(sizeof(All) * (dp.n + 1));
-    for (v = 0; v < 3; v++) {
-        for (f = 0; f < dp.n; f++) Tv[f] = T[f * 3 + v];
-        starts[v] = blob.n;
-        encode_voice(Tv, dp.n, dp.loop, &blob, &nref);
+    for (;;) {
+        blob.n = 0; nref = 0;
+        for (k = 0; k < 6; k++) bput(&blob, 0);
+        for (v = 0; v < 3; v++) {
+            for (f = 0; f < dp.n; f++) Tv[f] = T[f * 3 + v];
+            starts[v] = blob.n;
+            encode_voice(Tv, dp.n, dp.loop, &blob, &nref);
+        }
+        /* a 10 perc utani hurok nem fer el -> inkabb a regi mod: maxf kepkocka, aztan elolrol */
+        if (blob.n > SONG_MAX && dp.n > maxf) { dp.n = maxf; dp.loop = -1; hang = 0; mem_loop = -2; continue; }
+        break;
     }
     for (v = 0; v < 3; v++) {
         int a = SONG_BASE + starts[v];
@@ -937,7 +990,17 @@ static int aldal(const SidFajl *s, const char *path, int song, const char *outdi
     mkdir_p(mappa);
     info("%s / %s - %d. aldal: %d kepkocka (%d:%02d), hurok: ", s->name, s->author, song, dp.n,
          dp.n / 50 / 60, dp.n / 50 % 60);
-    if (dp.loop >= 0) info("%d:%02d-tol", dp.loop / 50 / 60, dp.loop / 50 % 60); else info("nincs (elolrol)");
+    if (dp.loop >= 0) {
+        int P = dp.n - dp.loop;
+        if (P == 1) info("%d:%02d-tol csend/kitartott hang (vege)", dp.loop / 50 / 60, dp.loop / 50 % 60);
+        else info("%d:%02d-tol, %d:%02d hosszu", dp.loop / 50 / 60, dp.loop / 50 % 60, P / 50 / 60, P / 50 % 60);
+        info(hang ? " [hang]" : " [memoria]");
+    } else info(mem_loop == -2 ? "van 10 perc utan, de ugy nem fer el -> 10 perc, aztan elolrol" : "nincs (elolrol)");
+    if (hang) {
+        if (mem_loop >= 0) info(" (memoria szerint: %d:%02d-tol, %d:%02d)", mem_loop / 50 / 60, mem_loop / 50 % 60,
+                                (mem_n - mem_loop) / 50 / 60, (mem_n - mem_loop) / 50 % 60);
+        else info(" (memoria szerint: nincs)");
+    }
     info(", %d byte (%d REF)", blob.n, nref);
     if (blob.n > SONG_MAX) {
         info("\n");
@@ -982,7 +1045,7 @@ static int aldal(const SidFajl *s, const char *path, int song, const char *outdi
         snprintf(fajl, sizeof(fajl), "%s/SONG%d.WAV", mappa, song);
         if (wav_ir(fajl, T, dp.n)) info("  WAV: %s\n", fajl);
     }
-    for (f = 0; f < dp.n; f++) free(dp.k[f].w);
+    for (f = 0; f < mem_n; f++) free(dp.k[f].w);
     free(dp.k);
     free(T);
     free(Tv);
@@ -993,13 +1056,14 @@ static int aldal(const SidFajl *s, const char *path, int song, const char *outdi
 static void hasznalat(void)
 {
     printf("sid2tvc " VERZIO " - C64 .sid -> TVC SIDSoftEMU dal (.STC)\n"
-           "hasznalat: sid2tvc [-s N | -a] [-o MAPPA] [-n NEV] [-w] [-f N] [-q] fajl.sid\n"
+           "hasznalat: sid2tvc [-s N | -a] [-o MAPPA] [-n NEV] [-w] [-f N] [-m] [-q] fajl.sid\n"
            "  -s N      aldal (alapertelmezes: a .sid kezdo dala)\n"
            "  -a        az osszes aldal\n"
            "  -o MAPPA  kimenet: MAPPA/<NEV>/SONG<n>.STC (alapertelmezes: SID_TVC)\n"
            "  -n NEV    a mappa neve (legfeljebb 8 betu; alapertelmezes: a .sid fajlnevebol)\n"
            "  -w        WAV elonezet is (a TVC hangja): MAPPA/<NEV>/SONG<n>.WAV\n"
-           "  -f N      legfeljebb N kepkocka (50/mp, alapertelmezes 30000)\n"
+           "  -f N      hurok nelkul legfeljebb N kepkocka (50/mp, alapertelmezes 30000 = 10 perc)\n"
+           "  -m        csak a memoria-hurok (a hang ismetlodeset nem keresi)\n"
            "  -q        csak a hibak\n");
 }
 
@@ -1015,6 +1079,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-o") && i + 1 < argc) outdir = argv[++i];
         else if (!strcmp(argv[i], "-n") && i + 1 < argc) nev_kapcsolo = argv[++i];
         else if (!strcmp(argv[i], "-w")) wav = 1;
+        else if (!strcmp(argv[i], "-m")) csak_mem = 1;
         else if (!strcmp(argv[i], "-f") && i + 1 < argc) maxf = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-q")) csendes = 1;
         else if (!strcmp(argv[i], "-D") && i + 1 < argc) debug_ki = argv[++i];
