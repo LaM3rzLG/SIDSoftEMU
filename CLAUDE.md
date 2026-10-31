@@ -45,9 +45,11 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   port 5, CRTC R10/R11 = 3) és a menübe. Dekódoló asm-ben: zöld sáv ~2-3%.
 - Méretek: 26-41 KB; **az 5. aldal 47 KB, nem fér el** (nincs a lemezen) - jobb tömörítés kell (pl. 2 szintű REF).
   A 2. és 9. aldalnak 10 percen belül nincs hurka (10 perc után elölről).
-- **KÖVETKEZŐ IRÁNY (a felhasználó javaslata, 2026-10-31): teljes TVC-s SID-lejátszó.** A lemezen az eredeti .sid
-  a **`SID`** mappában, a TVC által kiszámolt dal a **`SID_TVC`** mappában (pl. `SID\LNINJA.SID` ->
-  `SID_TVC\LNINJ03.DAL`). Menü -> ha van kiszámolt fájl, rögtön szól; ha nincs, a TVC kiszámolja (Z80-as 6502-emu,
+- **MOST ÉPÜL (a felhasználó döntése, 2026-10-31): teljes TVC-s SID-lejátszó, terv: `docs/02_TVC_SID_lejatszo_terv.md`.**
+  **Névrend (a felhasználó döntése):** a `SID` mappában BÁRMILYEN nevű .sid lehet (8.3); a kiszámolt párja
+  **`SID_TVC\<NÉV>\<nn>.STC`** (.sid-enként almappa, aldalanként egy fájl). Repóban: `sid/LNINJA.SID`,
+  `sid_tvc/LNINJA/03.STC` (a build mindkettőt a lemezre teszi; `make_dsk.ps1` tetszőleges mélységű mappát tud).
+  1. lépés KÉSZ (emu): a lejátszó a `SID_TVC\LNINJA\nn.STC`-ből tölt, programból is megy az elérési út. Menü -> ha van kiszámolt fájl, rögtön szól; ha nincs, a TVC kiszámolja (Z80-as 6502-emu,
   "Számolás... %"), lemezre menti, lejátssza. Csak a kiválasztott aldalt számolja. Lejátszás változatlan.
   Mért (Macen): LN egy aldala csak ~4 KB (az init a 4 KB-os blokkot $B000-ra másolja, a play csak $B000-$BA6D +
   nullás lap + $2000 ugrótábla), play átlag ~470 / max ~1400 6502-utasítás képkockánként -> becslés: számolás =

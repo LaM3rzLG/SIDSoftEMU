@@ -14,7 +14,8 @@ if ($p.ExitCode -ne 0 -or $hibak -or -not (Test-Path $cas) -or (Get-Item $cas).L
 }
 "forditas OK"
 $lemez = @("SIDSoftEMU.cas=SIDSOFT.CAS")
-Get-ChildItem (Join-Path $Gyoker "dalok") -Filter "DAL*.BIN" -ErrorAction SilentlyContinue | ForEach-Object { $lemez += ("dalok/" + $_.Name + "=" + $_.Name) }
+Get-ChildItem (Join-Path $Gyoker "sid") -Filter "*.SID" -ErrorAction SilentlyContinue | ForEach-Object { $lemez += ("sid/" + $_.Name + "=SID/" + $_.Name) }
+Get-ChildItem (Join-Path $Gyoker "sid_tvc") -Directory -ErrorAction SilentlyContinue | ForEach-Object { $d = $_.Name; Get-ChildItem $_.FullName -Filter "*.STC" | ForEach-Object { $lemez += ("sid_tvc/" + $d + "/" + $_.Name + "=SID_TVC/" + $d + "/" + $_.Name) } }
 & (Join-Path $PSScriptRoot "make_dsk.ps1") -Out "SIDSoftEMU.dsk" -Files $lemez | Select-Object -Last 1
 
 # --- WinTVC: a regi peldany bezarasa, uj inditas a friss lemezzel (/d = A: lemez, /a = LOAD"*" -> az elso fajl, SIDSOFT.CAS) ---

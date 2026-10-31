@@ -1,9 +1,9 @@
 program SIDSoftEMU;
 @use "TVC"
 
-/* SIDSoftEMU - SID-lejatszo (2026-10-31): a .sid-bol PC-n keszult dal (tools/sid2tvc.py -> dalok/DALnn.BIN)
+/* SIDSoftEMU - SID-lejatszo (2026-10-31): a .sid-bol PC-n keszult dal (tools/sid2tvc.py -> sid_tvc/<NEV>/nn.STC, a lemezen SID_TVC\<NEV>\nn.STC)
    lemezrol, 3 hang 5008 Hz-en ("A" valtozat: hangonkent 0..5 szint, osszeg a port 6-ra).
-   - Menu (a ROM el): 1..9, 0 = 10, A = 11 -> DALnn.BIN betoltese, lejatszas. Lejatszas kozben barmely gomb = vissza.
+   - Menu (a ROM el): 1..9, 0 = 10, A = 11 -> SID_TVC\LNINJA\nn.STC betoltese, lejatszas. Lejatszas kozben barmely gomb = vissza.
    - Betoltes a ROM-mal (Lemmings-sorrend: $0B0A:=0, $D3 nyitas, $D2 olvasas, $D4 zaras). A fajl: 2 byte hossz,
      aztan a dal $C000 feletti resze (ez $8000-ra jon = U2, onnan U3-ba masoljuk), vegul a $4000-$BFFF resz.
    - Lejatszas: teljes 64K RAM ($B0: U0,U1,U2,U3; a kepet a CRTC a VID-bol mutatja tovabb), tablak $EF00-$FFFF,
@@ -16,7 +16,7 @@ program SIDSoftEMU;
 
 var
 	SidTablak	:	incbin("resources/sid_tablak.bin");		/* 17 lap -> $EF00 */
-	Fajlnev		:	array[10] of byte = (9, $44, $41, $4C, $30, $33, $2E, $42, $49, $4E);	/* "DAL03.BIN" */
+	Fajlnev		:	array[22] of byte = (21, $53, $49, $44, $5F, $54, $56, $43, $5C, $4C, $4E, $49, $4E, $4A, $41, $5C, $30, $33, $2E, $53, $54, $43);	/* "SID_TVC\LNINJA\03.STC" - az aldal a 16-17. byte */
 	Kod, Dal, Hiba	:	byte;
 
 /* ---------------------------------------------------------------- betoltes (ROM-mal, a menubol) */
@@ -526,10 +526,10 @@ begin
 		if (Kod = $61) then Dal := 11;
 		if (Dal <> 0) then
 		begin
-			Fajlnev[4] := $30;
-			if (Dal >= 10) then Fajlnev[4] := $31;
-			Fajlnev[5] := $30 + Dal;
-			if (Dal >= 10) then Fajlnev[5] := $30 + Dal - 10;
+			Fajlnev[16] := $30;
+			if (Dal >= 10) then Fajlnev[16] := $31;
+			Fajlnev[17] := $30 + Dal;
+			if (Dal >= 10) then Fajlnev[17] := $30 + Dal - 10;
 			TVC::WriteAt(2, 18, "Betoltes...        ");
 			Betolt();
 			if (Hiba = 0) then

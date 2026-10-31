@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """.sid -> TVC dal (az "A" valtozat: 5008 Hz, hangonkent 0..5 szint) + a TVC pontos hangja WAV-ban.
 
-  python3 tools/sid2tvc.py sid/Last_Ninja.sid 3        (3 = aldal; alapertelmezes: a .sid kezdo dala)
+  python3 tools/sid2tvc.py sid/LNINJA.SID 3        (3 = aldal; alapertelmezes: a .sid kezdo dala)
 
 Lepesek: 6502-emulacio (sid_dump) -> kepkockankenti SID-allapot -> SID-burkolo (ADSR) szimulacio a
 valodi SID-idozitesekkel -> hangonkent (lepes, hullam/szint, PW) -> tomoritett esemenyfolyam.
-Kimenet: resources/sid_tablak.bin (17 lap, a TVC $EF00-ra masolja), dalok/DALnn.BIN (lemezfajl),
+Kimenet: resources/sid_tablak.bin (17 lap, a TVC $EF00-ra masolja), sid_tvc/<NEV>/<nn>.STC (a lemezen SID_TVC\\<NEV>\\<nn>.STC, NEV = a .sid neve),
 hang_minta/<nev>_<aldal>_tvc.wav (pontosan ez kell szoljon a TVC-n).
 
 A dal formatuma: 6 byte fejlec = a 3 hang folyamanak kezdete (lo,hi, a dal elejetol). Hangonkent
@@ -376,11 +376,11 @@ def main():
     # vegul a $4000-$BFFF resz
     split = 0xC000 - SONG_BASE
     fajl = struct.pack('<H', len(blob)) + blob[split:] + blob[:split]
-    os.makedirs(os.path.join(root, 'dalok'), exist_ok=True)
-    dalfajl = os.path.join(root, 'dalok', 'DAL%02d.BIN' % song)
+    nev = os.path.splitext(os.path.basename(path))[0].upper()
+    os.makedirs(os.path.join(root, 'sid_tvc', nev), exist_ok=True)
+    dalfajl = os.path.join(root, 'sid_tvc', nev, '%02d.STC' % song)     # a lemezen: SID_TVC\<NEV>\<nn>.STC
     with open(dalfajl, 'wb') as f:
         f.write(fajl)
-    nev = os.path.splitext(os.path.basename(path))[0]
     wav = os.path.join(root, 'hang_minta', '%s_%d_tvc.wav' % (nev, song))
     render(pages, T, wav)
     print('%s, %d. aldal: %d kepkocka (%.0f s), hurok: %s; dal: %d byte (%d REF) -> %s'
