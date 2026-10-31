@@ -1,0 +1,340 @@
+program Ir16Teszt;
+@use "GE"
+
+/* Ir16Teszt - 16 szinu, aranyos szovegkiiro (Ir16) probaprogramja (2026-10-31), TRSE + GE unit, GRAPHICS16.
+   Az Ir16 a WaterPumpGame Ir-jenek mintajara keszult (sorpuffer, betunkenti pixelszelesseg), de 16 szinu fonttal:
+   - resources/font16.bin (charset16_szerkeszto.html): [0] = $20 + magassag, [1..109] szelesseg (pont),
+     utana soronkent 109 x 4 byte GR16 kep (8 pont = 4 byte); kod 32..122 ASCII, 123..140 AEIOOOUUUaeiooouuu ekezetes.
+   - GR16-ban egy byte = 2 pont (bal: bit 7,5,3,1; jobb: bit 6,4,2,0), igy a fel-byte-os (paratlan pontra eso)
+     eltolas: a bal pont (bit 7,5,3,1) a jobb helyere (>>1), a jobb pont (bit 6,4,2,0) a kovetkezo byte bal
+     helyere (<<1) kerul, 4 byte -> 5 byte. Elobb a szoveg teglalapja feketere torlodik, aztan betunkent (egyszer dekodolva) mind a H sor
+     OR-ral kozvetlenul a kepre kerul (a 0 = fekete = hatter; a betu a szelessegen tul ures).
+   - X byte-ban (2 pont), Y kepsorban; a szoveg legfeljebb 128 pont szeles. A hatter fekete (a szoveg teglalapja torlodik).
+   - Ekezet a forrasban Latin-1-gyel; o"/u" helyett o^/u^ (mint a WPG Ir-ben).
+   Keret: piros = egy sor kiirasa minden kepkockaban (meres). Barmely gomb: semmi (csak nezelodes). */
+
+var
+	Font16_Data	:	incbin("resources/font16.bin");
+
+	Ir16_X							:	byte = 0;		/* be: x (byte = 2 pont); ki: a kovetkezo szabad byte-oszlop */
+	Ir16_Y							:	byte = 0;
+	Ir16_Szoveg						:	^byte;
+	Ir16_Szel, Ir16_Px, Ir16_Bdb, Ir16_H	:	byte = 0;
+	Ir16_Hossz						:	byte = 0;		/* az Ir16_Hossza eredmenye (byte) */
+	Ir16_Dst						:	integer = 0;
+
+	Sor		:	array[24] of byte;
+	i, k, y	:	byte;
+
+
+/* ---------------------------------------------------------------- 16 SZINU ARANYOS SZOVEGKIIRO */
+Procedure Ir16(Ir16_X, Ir16_Y : global byte; Ir16_Szoveg : global ^byte);
+	begin
+		asm("
+			ld a,[Ir16_Y]
+			ld l,a
+			ld h,0
+			add hl,hl
+			add hl,hl
+			add hl,hl
+			add hl,hl
+			add hl,hl
+			add hl,hl
+			ld de,[GE_ScreenAddr]
+			add hl,de
+			ld a,[Ir16_X]
+			ld e,a
+			ld d,0
+			add hl,de
+			ld [Ir16_Dst],hl
+			ld hl,[Ir16_Szoveg]
+			call Ir16_PxSzel
+			ld [Ir16_Bdb],a
+			or a
+			jp z,Ir16_Vege
+; 1. a szoveg teglalapja fekete (Bdb x magassag)
+			ld a,[Font16_Data]
+			and 15
+			ld [Ir16_H],a
+			ld b,a
+			ld hl,[Ir16_Dst]
+Ir16Torol:
+			push bc
+			push hl
+			ld (hl),0
+			ld a,[Ir16_Bdb]
+			dec a
+			jr z,Ir16Torol1
+			ld c,a
+			ld b,0
+			ld d,h
+			ld e,l
+			inc de
+			ldir
+Ir16Torol1:
+			pop hl
+			ld de,64
+			add hl,de
+			pop bc
+			djnz Ir16Torol
+; 2. betunkent az osszes sor, OR-ral a kepre
+			xor a
+			ld [Ir16_Px],a
+			ld hl,[Ir16_Szoveg]
+Ir16Kar:
+			ld a,(hl)
+			or a
+			jp z,Ir16KarVeg
+			inc hl
+			call Ir16_Ekezet
+			cp 32
+			jr c,Ir16Kar
+			cp 141
+			jr nc,Ir16Kar
+			sub 32
+			push hl
+			ld e,a
+			ld d,0
+			ld hl,Font16_Data+1
+			add hl,de
+			ld a,(hl)
+			or a
+			jp z,Ir16KarKesz
+			ld [Ir16_Szel],a
+			ex de,hl
+			add hl,hl
+			add hl,hl
+			ld de,Font16_Data+110
+			add hl,de
+			push hl
+			ld a,[Ir16_Px]
+			srl a
+			ld e,a
+			ld d,0
+			ld hl,[Ir16_Dst]
+			add hl,de
+			ex de,hl
+			pop hl
+			ld a,[Ir16_H]
+			ld b,a
+			ld a,[Ir16_Px]
+			rrca
+			jr c,Ir16Paratlan
+Ir16Paros:
+			ld a,(de)
+			or (hl)
+			ld (de),a
+			inc hl
+			inc de
+			ld a,(de)
+			or (hl)
+			ld (de),a
+			inc hl
+			inc de
+			ld a,(de)
+			or (hl)
+			ld (de),a
+			inc hl
+			inc de
+			ld a,(de)
+			or (hl)
+			ld (de),a
+			inc hl
+			ld a,l
+			add a,432-256
+			ld l,a
+			ld a,h
+			adc a,1
+			ld h,a
+			ld a,e
+			add a,61
+			ld e,a
+			jr nc,Ir16P1
+			inc d
+Ir16P1:
+			djnz Ir16Paros
+			jr Ir16Lep
+; paratlan pont: a bal pont (bit 7,5,3,1) a jobb helyere (>>1), a jobb pont (bit 6,4,2,0) a kovetkezo byte bal helyere (<<1)
+Ir16Paratlan:
+			push bc
+			ld c,0
+			ld b,4
+Ir16Tol:
+			ld a,(hl)
+			and $AA
+			rrca
+			or c
+			ex de,hl
+			or (hl)
+			ld (hl),a
+			ex de,hl
+			ld a,(hl)
+			and $55
+			rlca
+			ld c,a
+			inc hl
+			inc de
+			djnz Ir16Tol
+			ld a,(de)
+			or c
+			ld (de),a
+			ld a,l
+			add a,432-256
+			ld l,a
+			ld a,h
+			adc a,1
+			ld h,a
+			ld a,e
+			add a,60
+			ld e,a
+			jr nc,Ir16T1
+			inc d
+Ir16T1:
+			pop bc
+			djnz Ir16Paratlan
+Ir16Lep:
+			ld a,[Ir16_Szel]
+			ld c,a
+			ld a,[Ir16_Px]
+			add a,c
+			ld [Ir16_Px],a
+Ir16KarKesz:
+			pop hl
+			jp Ir16Kar
+Ir16KarVeg:
+			ld a,[Ir16_Bdb]
+			ld e,a
+			ld a,[Ir16_X]
+			add a,e
+			ld [Ir16_X],a
+			jp Ir16_Vege
+; a szoveg szelessege: HL = szoveg -> A = byte (2 pont), felfele kerekitve
+Ir16_PxSzel:
+			ld c,0
+Ir16_PKov:
+			ld a,(hl)
+			or a
+			jr z,Ir16_PVege
+			inc hl
+			call Ir16_Ekezet
+			cp 32
+			jr c,Ir16_PKov
+			cp 141
+			jr nc,Ir16_PKov
+			sub 32
+			push hl
+			ld e,a
+			ld d,0
+			ld hl,Font16_Data+1
+			add hl,de
+			ld a,(hl)
+			add a,c
+			ld c,a
+			pop hl
+			jr Ir16_PKov
+Ir16_PVege:
+			ld l,c
+			ld h,0
+			inc hl
+			srl h
+			rr l
+			ld a,l
+			ret
+; Ekezetes betu: Latin-1 ($C0..$FF) -> a font kodja (123..140); ismeretlen -> 0 (kimarad). A WPG Ir_Ekezet masa.
+Ir16_Ekezet:
+			cp $C0
+			ret c
+			push hl
+			sub $C0
+			ld d,a
+			and $1F
+			ld e,a
+			ld a,d
+			ld d,0
+			ld hl,Ir16_EkTab
+			add hl,de
+			ld e,a
+			ld a,(hl)
+			or a
+			jr z,Ir16_EkX
+			bit 5,e
+			jr z,Ir16_EkX
+			add a,9
+Ir16_EkX:
+			pop hl
+			ret
+Ir16_EkTab:
+			db 0,123,0,0,0,0,0,0,0,124,0,0,0,125,0,0
+			db 0,0,0,126,128,0,127,0,0,0,129,131,130,0,0,0
+Ir16_Vege:
+		");
+	end;
+
+/* Egy szoveg szelessege byte-ban (2 pont) -> Ir16_Hossz */
+Procedure Ir16_Hossza(Ir16_Szoveg : global ^byte);
+	begin
+		asm("
+			ld hl,[Ir16_Szoveg]
+			call Ir16_PxSzel
+			ld [Ir16_Hossz],a
+		");
+	end;
+
+/* Szoveg vizszintesen kozepre az y sorba */
+Procedure Ir16_Kozep(Ir16_Y : global byte; Ir16_Szoveg : global ^byte);
+	var x, yy : byte;
+		p : ^byte;
+	begin
+		yy := Ir16_Y;
+		p := Ir16_Szoveg;
+		Ir16_Hossza(p);
+		x := 64 - Ir16_Hossz;
+		x := x / 2;
+		Ir16(x, yy, p);
+	end;
+
+
+/* ---------------------------------------------------------------- foprogram */
+begin
+	GE::SetGraphics(GE::GRAPHICS16);
+	GE::Init(GE::DIRECT_TO_SCREEN);			/* a firmware IT-kezelot kikapcsolja */
+	GE::SetMemory(GE::MEM_VID_ON);			/* U0, U1, VID, SYS */
+	GE::SetBorder(GE::BORDER_BLACK);
+	GE::ClearScreen(GE::GR16_COLOR_BLACK);
+
+	Ir16_Kozep(6, "SIDSoftEMU");
+	Ir16_Kozep(22, "16 színû arányos betûk (Ir16)");
+	Ir16(2, 44, "ÁRVÍZTÛRÔ TÜKÖRFÚRÓGÉP");
+	Ir16(2, 58, "árvíztûrô tükörfúrógép");
+
+	/* a teljes keszlet: 32..140, soronkent 20 jel */
+	y := 80;
+	k := 32;
+	while (k < 141) do
+	begin
+		i := 0;
+		while ((i < 20) and (k < 141)) do
+		begin
+			Sor[i] := k;
+			i := i + 1;
+			k := k + 1;
+		end;
+		Sor[i] := 0;
+		Ir16(2, y, #Sor);
+		y := y + 14;
+	end;
+
+	Ir16(2, 176, "LNINJA1");
+	Ir16(30, 176, "<Könyvtár>");
+	Ir16(2, 190, "SONG5.STC");
+	Ir16(40, 190, "47 KB");
+	Ir16(2, 216, "Keret: piros = egy sor kiírása");
+
+	while (true) do
+	begin
+		GE::WaitForSync();
+		GE::SetBorder(GE::BORDER_RED);
+		Ir16(2, 44, "ÁRVÍZTÛRÔ TÜKÖRFÚRÓGÉP");
+		GE::SetBorder(GE::BORDER_BLACK);
+	end;
+end.
