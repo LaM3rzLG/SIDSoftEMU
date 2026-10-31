@@ -2,8 +2,8 @@ program FajlTeszt;
 @use "GE"
 
 /* FajlTeszt - a SIDSoftEMU mini fajlkezelojenek probaprogramja (2026-10-31), TRSE + GE unit.
-   - Kiiras: GE::WriteText, a WaterPumpGame regi GE-s betukeszlete (resources/CharSetGR4.bin: 8x7 pont,
-     ASCII 32..90 = szokoz, szamok, jelek, NAGYBETUK). A kisbetu nagybetu lesz, a \ -> /, a _ -> -.
+   - Kiiras: GE::WriteText, betukeszlet: resources/font.bin -> font_ge.ps1 -> resources/font_ge.bin (8x7 pont,
+     ASCII 32..122 kis- es nagybetuvel, ekezetek; a \ = 153-as, a _ = 154-es kod, mert a GE a 91..96-ot nem kezeli).
    - Billentyuk: GE::GetKeyboard + GE::Pressed (a nyilak a matrix 8. soraban: JOY1_UP/DOWN/LEFT/RIGHT).
      Nyomva tartva ismetel (elso ismetles 20 kep utan, aztan 3 kepenkent).
    - Mozgaskor csak a regi es az uj sor jele rajzolodik ujra; a teljes lista csak lapozaskor / konyvtarvaltaskor.
@@ -12,7 +12,7 @@ program FajlTeszt;
    Fel/Le = valasztas, Balra/Jobbra = lapozas, Enter = konyvtarba be / .STC (most csak kiirja), ESC = feljebb. */
 
 var
-	CharSet		:	incbin("resources/CharSetGR4.bin");	/* 118 byte szeles, 7 sor, 59 karakter */
+	CharSet		:	incbin("resources/font_ge.bin");	/* 210 byte szeles, 7 sor, 105 karakter (font_ge.ps1) */
 
 	const LATHATO	: byte = 22;		/* ennyi listasor latszik */
 	const LISTA_Y	: byte = 26;		/* az elso listasor kepsora */
@@ -29,9 +29,13 @@ var
 	UtHossz, NevHossz, Db, Sel, Top, Regi, HibaKod	:	byte;
 	FishKod, FishHiba	:	byte;
 	Gomb, ElozoGomb, Ismetles	:	byte;
-	i, j, k, b, Elso	:	byte;
+	i, j, k, b, e, Elso	:	byte;
 	p			:	^byte;
 	a, Meret	:	integer;
+	/* Latin-1 ekezet ($C0..$DF / $E0..$FF, also 5 bit) -> GE kod (A' 128 .. U" 136; kisbetu +16). A hosszu o/u nincs a
+	   Latin-1-ben, ezert a forrasban o^/u^ (kalapos) all helyettuk: o^ = 133, u^ = 136. 0 = nincs ilyen betu. */
+	EkTab		:	array[32] of byte = (0,128,0,0,0,0,0,0,0,129,0,0,0,130,0,0,
+								 0,0,0,131,133,0,132,0,0,0,134,136,135,0,0,0);
 
 
 /* ---------------------------------------------------------------- az egyetlen asm: FISH-hivas
@@ -114,14 +118,26 @@ begin
 end;
 
 
-/* b -> a betukeszletben levo karakter */
+/* b (ASCII / Latin-1) -> a GE kodja a font_ge.bin-ben */
 procedure Atkod();
 begin
-	if (b >= 97) then
-		if (b <= 122) then b := b - 32;
-	if (b = 92) then b := 47;		/* \ -> / */
-	if (b = 95) then b := 45;		/* _ -> - */
-	if (b > 90) then b := 63;		/* ? */
+	if (b >= $C0) then
+	begin
+		e := b & 31;
+		if (EkTab[e] = 0) then b := 63
+		else
+		if (b >= $E0) then b := EkTab[e] + 16
+		else b := EkTab[e];
+	end
+	else
+	if (b = 92) then b := 153		/* \ : a font_ge.bin vegen */
+	else
+	if (b = 95) then b := 154		/* _ */
+	else
+	if (b > 122) then b := 63		/* ? */
+	else
+	if (b > 90) then
+		if (b < 97) then b := 63;
 end;
 
 
@@ -135,6 +151,31 @@ begin
 		k := k + 1;
 	end;
 	Sor[31] := 0;
+end;
+
+
+/* szoveg -> Sor[k..], k = a vege */
+procedure SzovegBe(szoveg : ^byte);
+begin
+	j := 0;
+	while (szoveg[j] <> 0) do
+	begin
+		b := szoveg[j];
+		Atkod();
+		Sor[k] := b;
+		k := k + 1;
+		j := j + 1;
+	end;
+end;
+
+
+/* szoveg kiirasa (x byte, y kepsor), atkodolva (ekezetek) */
+procedure Ir(x, y : byte; szoveg : ^byte);
+begin
+	k := 0;
+	SzovegBe(szoveg);
+	Sor[k] := 0;
+	GE::WriteText(x, y, #Sor);
 end;
 
 
@@ -194,16 +235,8 @@ begin
 			Sor[k + 16] := 32;
 			k := k + 1;
 		end;
-		Sor[16] := 60;		/* <KONYVTAR> */
-		Sor[17] := 75;
-		Sor[18] := 79;
-		Sor[19] := 78;
-		Sor[20] := 89;
-		Sor[21] := 86;
-		Sor[22] := 84;
-		Sor[23] := 65;
-		Sor[24] := 82;
-		Sor[25] := 62;
+		k := 16;
+		SzovegBe("<Könyvtár>");
 	end
 	else
 	begin
@@ -218,8 +251,7 @@ begin
 		if (b <> 0) then Meret := Meret + 1;
 		k := 17;
 		SzamIr();
-		Sor[23] := 75;		/* KB */
-		Sor[24] := 66;
+		SzovegBe(" KB");
 	end;
 end;
 
@@ -243,17 +275,8 @@ begin
 	if (Db = 0) then
 	begin
 		SorUres();
-		Sor[0] := 40;	/* (URES) HIBA: n */
-		Sor[1] := 85;
-		Sor[2] := 82;
-		Sor[3] := 69;
-		Sor[4] := 83;
-		Sor[5] := 41;
-		Sor[7] := 72;
-		Sor[8] := 73;
-		Sor[9] := 66;
-		Sor[10] := 65;
-		Sor[11] := 58;
+		k := 0;
+		SzovegBe("(üres) hiba:");
 		Meret := HibaKod;
 		k := 11;
 		SzamIr();
@@ -265,14 +288,14 @@ end;
 procedure Allapot(szoveg : ^byte);
 begin
 	GE::FillRect(0, ALLAPOT_Y, 64, 8, 0);
-	GE::WriteText(0, ALLAPOT_Y, szoveg);
+	Ir(0, ALLAPOT_Y, szoveg);
 end;
 
 
 procedure Rajz();
 begin
 	GE::ClearScreen(GE::GR4_COLOR0);
-	GE::WriteText(0, 0, "SIDSOFTEMU - FAJLKEZELO (TESZT)");
+	Ir(0, 0, "SIDSoftEMU - fájlkezelô (teszt)");
 	/* az ut */
 	SorUres();
 	k := 0;
@@ -287,8 +310,8 @@ begin
 		k := k + 1;
 	end;
 	GE::WriteText(0, 11, #Sor);
-	GE::WriteText(0, 222, "FEL/LE, BALRA/JOBBRA: LAPOZAS");
-	GE::WriteText(0, 231, "ENTER: NYIT, ESC: VISSZA");
+	Ir(0, 222, "Fel/Le, Balra/Jobbra: lapozás");
+	Ir(0, 231, "Enter: megnyitás, ESC: vissza");
 	ListaRajz();
 end;
 
@@ -429,17 +452,12 @@ begin
 			if (p[10] = 67) then b := 1;
 	if (b = 0) then
 	begin
-		Allapot("CSAK .STC FAJL JATSZHATO");
+		Allapot("Csak .STC fájl játszható");
 		return;
 	end;
 	SorUres();
-	Sor[0] := 83;	/* SZOLNA: */
-	Sor[1] := 90;
-	Sor[2] := 79;
-	Sor[3] := 76;
-	Sor[4] := 78;
-	Sor[5] := 65;
-	Sor[6] := 58;
+	k := 0;
+	SzovegBe("Szólna: ");
 	k := 0;
 	while (k < NevHossz) do
 	begin
@@ -448,7 +466,8 @@ begin
 		Sor[k + 8] := b;
 		k := k + 1;
 	end;
-	Allapot(#Sor);
+	GE::FillRect(0, ALLAPOT_Y, 64, 8, 0);
+	GE::WriteText(0, ALLAPOT_Y, #Sor);
 end;
 
 
@@ -497,7 +516,7 @@ begin
 	GE::SetPalette(2, GE::PALETTE_RED);
 	GE::SetPalette(3, GE::PALETTE_YELLOW);
 	GE::SetBorder(GE::BORDER_BLACK);
-	GE::InitCharSet(#CharSet, 118, 2, 7);
+	GE::InitCharSet(#CharSet, 210, 2, 7);
 
 	Ut[0] := 92;		/* \ */
 	Ut[1] := 0;

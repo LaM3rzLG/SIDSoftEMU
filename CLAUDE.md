@@ -76,10 +76,12 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   Valódi gépen (SD) a FISH-hívás még NINCS kipróbálva - ha ott nem megy, a lista üres/hibakód.
 - **FajlTeszt (2026-10-31, ep128emu-ben kipróbálva) - a fájlkezelő új változata KÜLÖN próbaprogramban** (a felhasználó
   kérése: "kegyetlen lassú", TRSE-ben, GE/TVC unittal, ne asm-ben). `FajlTeszt.ras` (Pascal + GE: WriteText, FillRect,
-  GetKeyboard/Pressed, a nyilak = `JOY1_*`), egyetlen asm: `FishHivas` (FISH 04H/05H). Betűk: a WaterPumpGame régi
-  `resources/CharSetGR4.bin` (8x7, csak ASCII 32..90: nagybetű; `\`->`/`, `_`->`-`). Build: `bash resources/build_fajlteszt_mac.sh`,
-  lemez `FajlTeszt.dsk`, `load"FAJLTESZ"`. Mérve: könyvtárváltás ~0,1 s (a ROM-os kiírással ~1 s volt), nyomva tartott
-  nyíl ~16 sor/s, csak a jel rajzolódik át. Enter .STC-n most csak kiírja (SZOLNA: név). A SIDSoftEMU-ba még NINCS átvéve.
+  GetKeyboard/Pressed, a nyilak = `JOY1_*`), egyetlen asm: `FishHivas` (FISH 04H/05H). **Betűk: a felhasználó
+  `resources/font.bin`-je** (1 bites, arányos, kis/nagybetű + ékezet) -> `resources/font_ge.ps1` (a build `elotte()`-je)
+  -> `font_ge.bin` (GE-sorrend, 8 px cella, `\` = 153, `_` = 154). Szöveg kis/nagybetűvel, ékezettel az `Ir()`-on át
+  (a TRSE Latin-1-et fordít; ő/ű nincs benne -> a forrásban ô/û). Build: `bash resources/build_fajlteszt_mac.sh`,
+  lemez `FajlTeszt.dsk`, `load"FAJLTESZ"`. Mérve: könyvtárváltás ~0,1 s (ROM-os kiírással ~1 s volt), nyomva tartott
+  nyíl ~16 sor/s. Enter .STC-n most csak kiírja (Szólna: név). A SIDSoftEMU-ba még NINCS átvéve.
 - Folytatási ötletek: hangminőség (szűrő közelítése táblával, finomabb szintek/keverés, zaj), 5. aldal
   tömörítése, más .sid-ek kipróbálása, dal neve a fájlból a menüben.
 
