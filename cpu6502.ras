@@ -1,0 +1,4301 @@
+/* GENERALT FAJL - ne szerkeszd! Forras: tools/gen_cpu6502.py. 6502-emulator Z80-on. */
+procedure CpuKod();
+begin
+	asm("
+;	6502-emulator kerete (kezzel irt resz; a generator a cpu6502.ras elejere masolja).
+;	TVC-lapok (teljes 64K RAM, $B0 lapozas mellett):
+CPU_JTL	EQU	$F8
+CPU_PT	EQU	$FA
+CPU_ZP	EQU	$FC
+CPU_STK	EQU	$FD
+CPU_IO	EQU	$FE
+CPU_ZERO	EQU	$FF
+;	$F800 ugrotabla also byte, $F900 felso byte, $FA00 laptabla (6502-lap -> TVC-lap), $FB00 erintett lapok,
+;	$FC00 6502 nullas lap, $FD00 6502 verem, $FE00 I/O ($D000-$DFFF), $FF00 ures lap (0 = BRK)
+
+		jp	CpuKodVege
+
+;	------------------------------------------------ valtozok
+	CpuS:
+		db	$FF
+	CpuVF:
+		db	0
+	CpuDF:
+		db	0
+	CpuIF:
+		db	0
+	CpuNDelta:
+		db	0
+	CpuTmp:
+		dw	0
+	CpuSVal:
+		db	0
+	CpuSLen:
+		db	0
+	CpuSPS:
+		dw	0
+	CpuSaveSP:
+		dw	0
+	CpuHivS:
+		db	0
+	CpuErr:
+		db	0
+	CpuErrOp:
+		db	0
+	CpuErrCim:
+		dw	0
+	CpuPool:
+		db	0
+	CpuPoolMin:
+		db	0
+	CpuImgLap:
+		db	0
+	CpuImg6502:
+		db	0
+	CpuImgDb:
+		db	0
+	CpuCim:
+		dw	0
+	CpuA:
+		db	0
+	CpuRtiP:
+		db	0
+	CpuRtiLo:
+		db	0
+	CpuRtiHi:
+		db	0
+	CpuLogN:
+		db	0
+	CpuLogP:
+		dw	0
+	CpuLog:
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	CpuAux:
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	CpuAuxTop:
+		db	0
+
+;	------------------------------------------------ CpuInit: tablak (hivas normal veremmel, $B0 lapozasban)
+;	be: CpuImgLap = a .sid kepenek elso TVC-lapja, CpuImg6502 = elso 6502-lapja, CpuImgDb = lapok szama,
+;	CpuPoolMin = az elso lap, amit a foglalas hasznalhat (felfele, a $F7-ig)
+	CpuInit:
+		ld	hl,CpuJtForras
+		ld	de,$F800
+		ld	b,0
+	CiJt:
+		ld	a,(hl)
+		ld	(de),a
+		inc	hl
+		inc	d
+		ld	a,(hl)
+		ld	(de),a
+		dec	d
+		inc	hl
+		inc	e
+		djnz	CiJt
+		;	laptabla: minden = ures; 0 = ZP, 1 = verem, $D0-$DF = I/O
+		ld	hl,$FA00
+	CiPt:
+		ld	(hl),CPU_ZERO
+		inc	l
+		jr	nz,CiPt
+		ld	(hl),CPU_ZP
+		inc	l
+		ld	(hl),CPU_STK
+		ld	l,$D0
+		ld	b,16
+	CiIo:
+		ld	(hl),CPU_IO
+		inc	l
+		djnz	CiIo
+		;	a .sid kepe
+		ld	a,(CpuImg6502)
+		ld	l,a
+		ld	a,(CpuImgDb)
+		ld	b,a
+		ld	a,(CpuImgLap)
+	CiImg:
+		ld	(hl),a
+		inc	a
+		inc	l
+		djnz	CiImg
+		;	erintett lapok, ZP, verem, I/O, ures lap: 0
+		ld	hl,$FB00
+		ld	de,$FB01
+		ld	bc,$04FF
+		ld	(hl),0
+		ldir
+		ld	a,$37
+		ld	($FC01),a
+		ld	a,$1B
+		ld	($FE11),a
+		ld	a,$FF
+		ld	(CpuS),a
+		ld	a,(CpuPoolMin)
+		ld	(CpuPool),a
+		xor	a
+		ld	(CpuVF),a
+		ld	(CpuDF),a
+		ld	(CpuIF),a
+		ld	(CpuErr),a
+		ld	hl,0
+		push	hl
+		pop	af
+		ex	af,af'
+		ret
+
+;	------------------------------------------------ CpuHiv: 6502-rutin hivasa (CpuCim, A = CpuA), di kell!
+	CpuHiv:
+		ld	(CpuSaveSP),sp
+		ld	a,(CpuS)
+		ld	(CpuHivS),a
+		ld	l,a
+		ld	h,CPU_STK
+		ld	(hl),$FF
+		dec	l
+		ld	(hl),$EF
+		dec	l
+		ld	a,l
+		ld	(CpuS),a
+		ex	af,af'
+		ld	a,(CpuA)
+		ex	af,af'
+		ld	bc,0
+		ld	de,(CpuCim)
+		ld	l,d
+		jp	CpuRtiJmp
+
+;	BRK ($00): a visszateres a $FFF0-ra (vagy hiba)
+	CpuStop:
+		ld	sp,(CpuSaveSP)
+		ld	a,(CpuS)
+		ld	hl,CpuHivS
+		cp	(hl)
+		ret	z
+		ld	a,1
+		ld	(CpuErr),a
+		ret
+
+	CpuIllegal:
+		ld	hl,-2
+		add	hl,sp
+		ld	(CpuErrCim),hl
+		ld	a,(hl)
+		ld	(CpuErrOp),a
+		ld	a,2
+		ld	(CpuErr),a
+		ld	sp,(CpuSaveSP)
+		ret
+
+;	------------------------------------------------ D jelzo: A = 0/1 -> ADC/SBC kezelok cserelese
+	CpuSetD:
+		ld	(CpuDF),a
+		ld	ix,CpuBcdLista
+	CsdKor:
+		ld	a,(ix+0)
+		or	a
+		jr	z,CsdVeg
+		ld	l,a
+		ld	h,CPU_JTL
+		ld	a,(CpuDF)
+		or	a
+		jr	nz,CsdBcd
+		ld	a,(ix+1)
+		ld	(hl),a
+		inc	h
+		ld	a,(ix+2)
+		ld	(hl),a
+		jr	CsdTov
+	CsdBcd:
+		ld	a,(ix+3)
+		ld	(hl),a
+		inc	h
+		ld	a,(ix+4)
+		ld	(hl),a
+	CsdTov:
+		ld	de,5
+		add	ix,de
+		jr	CsdKor
+	CsdVeg:
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+
+;	------------------------------------------------ PHP
+	CpuPhp:
+		ex	af,af'
+		ld	(CpuSPS),sp
+		ld	sp,CpuAuxTop
+		push	af
+		ld	sp,(CpuSPS)
+		ex	af,af'
+		ld	a,(CpuAuxTop-2)
+		ld	d,a
+		and	$81
+		ld	e,a
+		bit	6,d
+		jr	z,CphZ
+		set	1,e
+	CphZ:
+		ld	a,(CpuVF)
+		or	a
+		jr	z,CphV
+		set	6,e
+	CphV:
+		ld	a,(CpuDF)
+		or	a
+		jr	z,CphD
+		set	3,e
+	CphD:
+		ld	a,(CpuIF)
+		or	a
+		jr	z,CphI
+		set	2,e
+	CphI:
+		ld	a,e
+		or	$30
+		ld	e,a
+		ld	a,(CpuS)
+		ld	l,a
+		ld	h,CPU_STK
+		ld	(hl),e
+		dec	l
+		ld	a,l
+		ld	(CpuS),a
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+
+;	------------------------------------------------ jelzok beallitasa a P byte-bol (A = P), D = P marad
+	CpuPAllit:
+		ld	d,a
+		and	$40
+		ld	(CpuVF),a
+		ld	a,d
+		and	4
+		ld	(CpuIF),a
+		ld	a,d
+		and	$81
+		ld	e,a
+		bit	1,d
+		jr	z,CpaZ
+		set	6,e
+	CpaZ:
+		ex	af,af'
+		ld	h,a
+		ld	l,e
+		ld	(CpuSPS),sp
+		ld	sp,CpuAuxTop
+		push	hl
+		pop	af
+		ld	sp,(CpuSPS)
+		ex	af,af'
+		jp	(ix)
+
+	CpuPlp:
+		ld	ix,CplTov
+		jp	CpuPAllit
+	CplTov:
+		ld	a,d
+		rrca
+		rrca
+		rrca
+		and	1
+		jp	CpuSetD
+
+	CpuRti:
+		ld	a,(CpuRtiP)
+		ld	ix,CrtTov
+		jp	CpuPAllit
+	CrtTov:
+		ld	a,(CpuRtiLo)
+		ld	e,a
+		ld	a,(CpuRtiHi)
+		ld	l,a
+		jp	CpuRtiJmp
+
+;	------------------------------------------------ lassu iras: D = CPU_IO / CPU_ZERO, L = 6502 felso, E = also
+	CpuSlowSt:
+		ld	a,d
+		cp	CPU_ZERO
+		jr	z,CpuFoglal
+		ld	d,l
+		ld	l,e
+		ld	h,CPU_IO
+		ld	a,(CpuSVal)
+		ld	(hl),a
+		ld	a,d
+		and	$FC
+		cp	$D4
+		jr	nz,CssKesz
+		ld	a,e
+		and	$1F
+		cp	25
+		jr	nc,CssKesz
+		ld	e,a
+		ld	a,(CpuLogN)
+		cp	64
+		jr	nc,CssKesz
+		inc	a
+		ld	(CpuLogN),a
+		ld	hl,(CpuLogP)
+		ld	(hl),e
+		inc	hl
+		ld	a,(CpuSVal)
+		ld	(hl),a
+		inc	hl
+		ld	(CpuLogP),hl
+	CssKesz:
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+
+	CpuSlowRmw:
+		ld	a,d
+		cp	CPU_ZERO
+		jr	nz,CssKesz
+	;	uj lap a 6502-lapnak (L), az utasitas ujra
+	CpuFoglal:
+		ld	a,(CpuPool)			;	felfele foglal (a sorban irt lapok egymas utan kerulnek -> a kod atfolyhat)
+		cp	CPU_JTL
+		jr	nc,CpuNincsHely
+		ld	h,CPU_PT
+		ld	(hl),a
+		inc	a
+		ld	(CpuPool),a
+		dec	a
+		ld	h,a
+		ld	l,0
+		xor	a
+	CfTorl:
+		ld	(hl),a
+		inc	l
+		jr	nz,CfTorl
+		ld	hl,0
+		add	hl,sp
+		ld	a,(CpuSLen)
+		ld	e,a
+		ld	d,0
+		or	a
+		sbc	hl,de
+		ld	sp,hl
+		jr	CssKesz
+	CpuNincsHely:
+		ld	a,3
+		ld	(CpuErr),a
+		ld	sp,(CpuSaveSP)
+		ret
+;	------------------------------------------------ utasitasok (generalt)
+	CpuOp09:
+		ex	af,af'
+		jr	c,Cl1
+		or	e
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl1:
+		or	e
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp05:
+		ld	l,e
+		ld	h,CPU_ZP
+		ex	af,af'
+		jr	c,Cl2
+		or	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl2:
+		or	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp15:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ex	af,af'
+		jr	c,Cl3
+		or	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl3:
+		or	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp0D:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		jr	c,Cl4
+		or	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl4:
+		or	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp1D:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,b
+		ld	e,a
+		jr	nc,Cl5
+		inc	l
+	Cl5:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		jr	c,Cl6
+		or	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl6:
+		or	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp19:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,c
+		ld	e,a
+		jr	nc,Cl7
+		inc	l
+	Cl7:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		jr	c,Cl8
+		or	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl8:
+		or	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp01:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ld	e,(hl)
+		inc	l
+		ld	l,(hl)
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		jr	c,Cl9
+		or	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl9:
+		or	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp11:
+		ld	l,e
+		ld	h,CPU_ZP
+		ld	a,(hl)
+		add	a,c
+		ld	e,a
+		inc	l
+		ld	l,(hl)
+		jr	nc,Cl10
+		inc	l
+	Cl10:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		jr	c,Cl11
+		or	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl11:
+		or	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp29:
+		ex	af,af'
+		jr	c,Cl12
+		and	e
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl12:
+		and	e
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp25:
+		ld	l,e
+		ld	h,CPU_ZP
+		ex	af,af'
+		jr	c,Cl13
+		and	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl13:
+		and	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp35:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ex	af,af'
+		jr	c,Cl14
+		and	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl14:
+		and	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp2D:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		jr	c,Cl15
+		and	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl15:
+		and	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp3D:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,b
+		ld	e,a
+		jr	nc,Cl16
+		inc	l
+	Cl16:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		jr	c,Cl17
+		and	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl17:
+		and	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp39:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,c
+		ld	e,a
+		jr	nc,Cl18
+		inc	l
+	Cl18:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		jr	c,Cl19
+		and	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl19:
+		and	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp21:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ld	e,(hl)
+		inc	l
+		ld	l,(hl)
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		jr	c,Cl20
+		and	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl20:
+		and	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp31:
+		ld	l,e
+		ld	h,CPU_ZP
+		ld	a,(hl)
+		add	a,c
+		ld	e,a
+		inc	l
+		ld	l,(hl)
+		jr	nc,Cl21
+		inc	l
+	Cl21:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		jr	c,Cl22
+		and	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl22:
+		and	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp49:
+		ex	af,af'
+		jr	c,Cl23
+		xor	e
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl23:
+		xor	e
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp45:
+		ld	l,e
+		ld	h,CPU_ZP
+		ex	af,af'
+		jr	c,Cl24
+		xor	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl24:
+		xor	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp55:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ex	af,af'
+		jr	c,Cl25
+		xor	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl25:
+		xor	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp4D:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		jr	c,Cl26
+		xor	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl26:
+		xor	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp5D:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,b
+		ld	e,a
+		jr	nc,Cl27
+		inc	l
+	Cl27:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		jr	c,Cl28
+		xor	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl28:
+		xor	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp59:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,c
+		ld	e,a
+		jr	nc,Cl29
+		inc	l
+	Cl29:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		jr	c,Cl30
+		xor	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl30:
+		xor	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp41:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ld	e,(hl)
+		inc	l
+		ld	l,(hl)
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		jr	c,Cl31
+		xor	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl31:
+		xor	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp51:
+		ld	l,e
+		ld	h,CPU_ZP
+		ld	a,(hl)
+		add	a,c
+		ld	e,a
+		inc	l
+		ld	l,(hl)
+		jr	nc,Cl32
+		inc	l
+	Cl32:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		jr	c,Cl33
+		xor	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cl33:
+		xor	(hl)
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuBcd69:
+		ex	af,af'
+		adc	a,e
+		daa
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp69:
+		ex	af,af'
+		adc	a,e
+		ld	hl,CpuVF
+		ld	(hl),0
+		jp	po,Cl34
+		ld	(hl),1
+	Cl34:
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuBcd65:
+		ld	l,e
+		ld	h,CPU_ZP
+		ex	af,af'
+		adc	a,(hl)
+		daa
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp65:
+		ld	l,e
+		ld	h,CPU_ZP
+		ex	af,af'
+		adc	a,(hl)
+		ld	hl,CpuVF
+		ld	(hl),0
+		jp	po,Cl35
+		ld	(hl),1
+	Cl35:
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuBcd75:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ex	af,af'
+		adc	a,(hl)
+		daa
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp75:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ex	af,af'
+		adc	a,(hl)
+		ld	hl,CpuVF
+		ld	(hl),0
+		jp	po,Cl36
+		ld	(hl),1
+	Cl36:
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuBcd6D:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		adc	a,(hl)
+		daa
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp6D:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		adc	a,(hl)
+		ld	hl,CpuVF
+		ld	(hl),0
+		jp	po,Cl37
+		ld	(hl),1
+	Cl37:
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuBcd7D:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,b
+		ld	e,a
+		jr	nc,Cl40
+		inc	l
+	Cl40:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		adc	a,(hl)
+		daa
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp7D:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,b
+		ld	e,a
+		jr	nc,Cl38
+		inc	l
+	Cl38:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		adc	a,(hl)
+		ld	hl,CpuVF
+		ld	(hl),0
+		jp	po,Cl39
+		ld	(hl),1
+	Cl39:
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuBcd79:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,c
+		ld	e,a
+		jr	nc,Cl43
+		inc	l
+	Cl43:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		adc	a,(hl)
+		daa
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp79:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,c
+		ld	e,a
+		jr	nc,Cl41
+		inc	l
+	Cl41:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		adc	a,(hl)
+		ld	hl,CpuVF
+		ld	(hl),0
+		jp	po,Cl42
+		ld	(hl),1
+	Cl42:
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuBcd61:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ld	e,(hl)
+		inc	l
+		ld	l,(hl)
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		adc	a,(hl)
+		daa
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp61:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ld	e,(hl)
+		inc	l
+		ld	l,(hl)
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		adc	a,(hl)
+		ld	hl,CpuVF
+		ld	(hl),0
+		jp	po,Cl44
+		ld	(hl),1
+	Cl44:
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuBcd71:
+		ld	l,e
+		ld	h,CPU_ZP
+		ld	a,(hl)
+		add	a,c
+		ld	e,a
+		inc	l
+		ld	l,(hl)
+		jr	nc,Cl47
+		inc	l
+	Cl47:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		adc	a,(hl)
+		daa
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp71:
+		ld	l,e
+		ld	h,CPU_ZP
+		ld	a,(hl)
+		add	a,c
+		ld	e,a
+		inc	l
+		ld	l,(hl)
+		jr	nc,Cl45
+		inc	l
+	Cl45:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		adc	a,(hl)
+		ld	hl,CpuVF
+		ld	(hl),0
+		jp	po,Cl46
+		ld	(hl),1
+	Cl46:
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpA9:
+		ex	af,af'
+		ld	a,e
+		inc	a
+		dec	a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpA5:
+		ld	l,e
+		ld	h,CPU_ZP
+		ex	af,af'
+		ld	a,(hl)
+		inc	a
+		dec	a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpB5:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ex	af,af'
+		ld	a,(hl)
+		inc	a
+		dec	a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpAD:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		ld	a,(hl)
+		inc	a
+		dec	a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpBD:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,b
+		ld	e,a
+		jr	nc,Cl48
+		inc	l
+	Cl48:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		ld	a,(hl)
+		inc	a
+		dec	a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpB9:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,c
+		ld	e,a
+		jr	nc,Cl49
+		inc	l
+	Cl49:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		ld	a,(hl)
+		inc	a
+		dec	a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpA1:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ld	e,(hl)
+		inc	l
+		ld	l,(hl)
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		ld	a,(hl)
+		inc	a
+		dec	a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpB1:
+		ld	l,e
+		ld	h,CPU_ZP
+		ld	a,(hl)
+		add	a,c
+		ld	e,a
+		inc	l
+		ld	l,(hl)
+		jr	nc,Cl50
+		inc	l
+	Cl50:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		ld	a,(hl)
+		inc	a
+		dec	a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpC9:
+		ex	af,af'
+		cp	e
+		ccf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpC5:
+		ld	l,e
+		ld	h,CPU_ZP
+		ex	af,af'
+		cp	(hl)
+		ccf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpD5:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ex	af,af'
+		cp	(hl)
+		ccf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpCD:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		cp	(hl)
+		ccf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpDD:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,b
+		ld	e,a
+		jr	nc,Cl51
+		inc	l
+	Cl51:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		cp	(hl)
+		ccf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpD9:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,c
+		ld	e,a
+		jr	nc,Cl52
+		inc	l
+	Cl52:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		cp	(hl)
+		ccf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpC1:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ld	e,(hl)
+		inc	l
+		ld	l,(hl)
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		cp	(hl)
+		ccf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpD1:
+		ld	l,e
+		ld	h,CPU_ZP
+		ld	a,(hl)
+		add	a,c
+		ld	e,a
+		inc	l
+		ld	l,(hl)
+		jr	nc,Cl53
+		inc	l
+	Cl53:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		cp	(hl)
+		ccf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuBcdE9:
+		ex	af,af'
+		ccf
+		sbc	a,e
+		daa
+		ccf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpE9:
+		ex	af,af'
+		ccf
+		sbc	a,e
+		ccf
+		ld	hl,CpuVF
+		ld	(hl),0
+		jp	po,Cl54
+		ld	(hl),1
+	Cl54:
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuBcdE5:
+		ld	l,e
+		ld	h,CPU_ZP
+		ex	af,af'
+		ccf
+		sbc	a,(hl)
+		daa
+		ccf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpE5:
+		ld	l,e
+		ld	h,CPU_ZP
+		ex	af,af'
+		ccf
+		sbc	a,(hl)
+		ccf
+		ld	hl,CpuVF
+		ld	(hl),0
+		jp	po,Cl55
+		ld	(hl),1
+	Cl55:
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuBcdF5:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ex	af,af'
+		ccf
+		sbc	a,(hl)
+		daa
+		ccf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpF5:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ex	af,af'
+		ccf
+		sbc	a,(hl)
+		ccf
+		ld	hl,CpuVF
+		ld	(hl),0
+		jp	po,Cl56
+		ld	(hl),1
+	Cl56:
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuBcdED:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		ccf
+		sbc	a,(hl)
+		daa
+		ccf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpED:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		ccf
+		sbc	a,(hl)
+		ccf
+		ld	hl,CpuVF
+		ld	(hl),0
+		jp	po,Cl57
+		ld	(hl),1
+	Cl57:
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuBcdFD:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,b
+		ld	e,a
+		jr	nc,Cl60
+		inc	l
+	Cl60:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		ccf
+		sbc	a,(hl)
+		daa
+		ccf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpFD:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,b
+		ld	e,a
+		jr	nc,Cl58
+		inc	l
+	Cl58:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		ccf
+		sbc	a,(hl)
+		ccf
+		ld	hl,CpuVF
+		ld	(hl),0
+		jp	po,Cl59
+		ld	(hl),1
+	Cl59:
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuBcdF9:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,c
+		ld	e,a
+		jr	nc,Cl63
+		inc	l
+	Cl63:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		ccf
+		sbc	a,(hl)
+		daa
+		ccf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpF9:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,c
+		ld	e,a
+		jr	nc,Cl61
+		inc	l
+	Cl61:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		ccf
+		sbc	a,(hl)
+		ccf
+		ld	hl,CpuVF
+		ld	(hl),0
+		jp	po,Cl62
+		ld	(hl),1
+	Cl62:
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuBcdE1:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ld	e,(hl)
+		inc	l
+		ld	l,(hl)
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		ccf
+		sbc	a,(hl)
+		daa
+		ccf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpE1:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ld	e,(hl)
+		inc	l
+		ld	l,(hl)
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		ccf
+		sbc	a,(hl)
+		ccf
+		ld	hl,CpuVF
+		ld	(hl),0
+		jp	po,Cl64
+		ld	(hl),1
+	Cl64:
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuBcdF1:
+		ld	l,e
+		ld	h,CPU_ZP
+		ld	a,(hl)
+		add	a,c
+		ld	e,a
+		inc	l
+		ld	l,(hl)
+		jr	nc,Cl67
+		inc	l
+	Cl67:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		ccf
+		sbc	a,(hl)
+		daa
+		ccf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpF1:
+		ld	l,e
+		ld	h,CPU_ZP
+		ld	a,(hl)
+		add	a,c
+		ld	e,a
+		inc	l
+		ld	l,(hl)
+		jr	nc,Cl65
+		inc	l
+	Cl65:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		ccf
+		sbc	a,(hl)
+		ccf
+		ld	hl,CpuVF
+		ld	(hl),0
+		jp	po,Cl66
+		ld	(hl),1
+	Cl66:
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp85:
+		ld	l,e
+		ld	h,CPU_ZP
+		ex	af,af'
+		ld	(hl),a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp95:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ex	af,af'
+		ld	(hl),a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp8D:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ld	a,d
+		cp	CPU_IO
+		jp	nc,CpuSlowA3
+		ex	de,hl
+		ex	af,af'
+		ld	(hl),a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp9D:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,b
+		ld	e,a
+		jr	nc,Cl68
+		inc	l
+	Cl68:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ld	a,d
+		cp	CPU_IO
+		jp	nc,CpuSlowA3
+		ex	de,hl
+		ex	af,af'
+		ld	(hl),a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp99:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,c
+		ld	e,a
+		jr	nc,Cl69
+		inc	l
+	Cl69:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ld	a,d
+		cp	CPU_IO
+		jp	nc,CpuSlowA3
+		ex	de,hl
+		ex	af,af'
+		ld	(hl),a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp81:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ld	e,(hl)
+		inc	l
+		ld	l,(hl)
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ld	a,d
+		cp	CPU_IO
+		jp	nc,CpuSlowA2
+		ex	de,hl
+		ex	af,af'
+		ld	(hl),a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp91:
+		ld	l,e
+		ld	h,CPU_ZP
+		ld	a,(hl)
+		add	a,c
+		ld	e,a
+		inc	l
+		ld	l,(hl)
+		jr	nc,Cl70
+		inc	l
+	Cl70:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ld	a,d
+		cp	CPU_IO
+		jp	nc,CpuSlowA2
+		ex	de,hl
+		ex	af,af'
+		ld	(hl),a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp86:
+		ld	l,e
+		ld	h,CPU_ZP
+		ld	(hl),b
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp96:
+		ld	a,e
+		add	a,c
+		ld	l,a
+		ld	h,CPU_ZP
+		ld	(hl),b
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp8E:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ld	a,d
+		cp	CPU_IO
+		jp	nc,CpuSlowX3
+		ex	de,hl
+		ld	(hl),b
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp84:
+		ld	l,e
+		ld	h,CPU_ZP
+		ld	(hl),c
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp94:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ld	(hl),c
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp8C:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ld	a,d
+		cp	CPU_IO
+		jp	nc,CpuSlowY3
+		ex	de,hl
+		ld	(hl),c
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpA2:
+		ld	b,e
+		ex	af,af'
+		inc	b
+		dec	b
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpA6:
+		ld	l,e
+		ld	h,CPU_ZP
+		ld	b,(hl)
+		ex	af,af'
+		inc	b
+		dec	b
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpB6:
+		ld	a,e
+		add	a,c
+		ld	l,a
+		ld	h,CPU_ZP
+		ld	b,(hl)
+		ex	af,af'
+		inc	b
+		dec	b
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpAE:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ld	b,(hl)
+		ex	af,af'
+		inc	b
+		dec	b
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpBE:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,c
+		ld	e,a
+		jr	nc,Cl71
+		inc	l
+	Cl71:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ld	b,(hl)
+		ex	af,af'
+		inc	b
+		dec	b
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpA0:
+		ld	c,e
+		ex	af,af'
+		inc	c
+		dec	c
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpA4:
+		ld	l,e
+		ld	h,CPU_ZP
+		ld	c,(hl)
+		ex	af,af'
+		inc	c
+		dec	c
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpB4:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ld	c,(hl)
+		ex	af,af'
+		inc	c
+		dec	c
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpAC:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ld	c,(hl)
+		ex	af,af'
+		inc	c
+		dec	c
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpBC:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,b
+		ld	e,a
+		jr	nc,Cl72
+		inc	l
+	Cl72:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ld	c,(hl)
+		ex	af,af'
+		inc	c
+		dec	c
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpE0:
+		ex	af,af'
+		ld	d,a
+		ld	a,b
+		cp	e
+		ccf
+		ld	a,d
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpE4:
+		ld	l,e
+		ld	h,CPU_ZP
+		ex	af,af'
+		ld	d,a
+		ld	a,b
+		cp	(hl)
+		ccf
+		ld	a,d
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpEC:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		ld	d,a
+		ld	a,b
+		cp	(hl)
+		ccf
+		ld	a,d
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpC0:
+		ex	af,af'
+		ld	d,a
+		ld	a,c
+		cp	e
+		ccf
+		ld	a,d
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpC4:
+		ld	l,e
+		ld	h,CPU_ZP
+		ex	af,af'
+		ld	d,a
+		ld	a,c
+		cp	(hl)
+		ccf
+		ld	a,d
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpCC:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ex	af,af'
+		ld	d,a
+		ld	a,c
+		cp	(hl)
+		ccf
+		ld	a,d
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp24:
+		ld	l,e
+		ld	h,CPU_ZP
+		ld	d,(hl)
+		ld	a,d
+		and	$40
+		ld	(CpuVF),a
+		ex	af,af'
+		ld	e,a
+		ld	a,0
+		adc	a,a
+		ld	h,a
+		ld	a,e
+		and	d
+		ld	a,h
+		jr	nz,Cl73
+		or	$40
+	Cl73:
+		bit	7,d
+		jr	z,Cl74
+		or	$80
+	Cl74:
+		ld	l,a
+		ld	h,e
+		ld	(CpuSPS),sp
+		ld	sp,CpuAuxTop
+		push	hl
+		pop	af
+		ld	sp,(CpuSPS)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp2C:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ld	d,(hl)
+		ld	a,d
+		and	$40
+		ld	(CpuVF),a
+		ex	af,af'
+		ld	e,a
+		ld	a,0
+		adc	a,a
+		ld	h,a
+		ld	a,e
+		and	d
+		ld	a,h
+		jr	nz,Cl75
+		or	$40
+	Cl75:
+		bit	7,d
+		jr	z,Cl76
+		or	$80
+	Cl76:
+		ld	l,a
+		ld	h,e
+		ld	(CpuSPS),sp
+		ld	sp,CpuAuxTop
+		push	hl
+		pop	af
+		ld	sp,(CpuSPS)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp0A:
+		dec	sp
+		ex	af,af'
+		sla	a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp06:
+		ld	l,e
+		ld	h,CPU_ZP
+		ex	af,af'
+		sla	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp16:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ex	af,af'
+		sla	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp0E:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ld	a,d
+		cp	CPU_IO
+		jp	nc,CpuSlowM3
+		ex	de,hl
+		ex	af,af'
+		sla	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp1E:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,b
+		ld	e,a
+		jr	nc,Cl77
+		inc	l
+	Cl77:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ld	a,d
+		cp	CPU_IO
+		jp	nc,CpuSlowM3
+		ex	de,hl
+		ex	af,af'
+		sla	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp4A:
+		dec	sp
+		ex	af,af'
+		srl	a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp46:
+		ld	l,e
+		ld	h,CPU_ZP
+		ex	af,af'
+		srl	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp56:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ex	af,af'
+		srl	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp4E:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ld	a,d
+		cp	CPU_IO
+		jp	nc,CpuSlowM3
+		ex	de,hl
+		ex	af,af'
+		srl	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp5E:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,b
+		ld	e,a
+		jr	nc,Cl78
+		inc	l
+	Cl78:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ld	a,d
+		cp	CPU_IO
+		jp	nc,CpuSlowM3
+		ex	de,hl
+		ex	af,af'
+		srl	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp2A:
+		dec	sp
+		ex	af,af'
+		rl	a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp26:
+		ld	l,e
+		ld	h,CPU_ZP
+		ex	af,af'
+		rl	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp36:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ex	af,af'
+		rl	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp2E:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ld	a,d
+		cp	CPU_IO
+		jp	nc,CpuSlowM3
+		ex	de,hl
+		ex	af,af'
+		rl	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp3E:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,b
+		ld	e,a
+		jr	nc,Cl79
+		inc	l
+	Cl79:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ld	a,d
+		cp	CPU_IO
+		jp	nc,CpuSlowM3
+		ex	de,hl
+		ex	af,af'
+		rl	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp6A:
+		dec	sp
+		ex	af,af'
+		rr	a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp66:
+		ld	l,e
+		ld	h,CPU_ZP
+		ex	af,af'
+		rr	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp76:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ex	af,af'
+		rr	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp6E:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ld	a,d
+		cp	CPU_IO
+		jp	nc,CpuSlowM3
+		ex	de,hl
+		ex	af,af'
+		rr	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp7E:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,b
+		ld	e,a
+		jr	nc,Cl80
+		inc	l
+	Cl80:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ld	a,d
+		cp	CPU_IO
+		jp	nc,CpuSlowM3
+		ex	de,hl
+		ex	af,af'
+		rr	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpE6:
+		ld	l,e
+		ld	h,CPU_ZP
+		ex	af,af'
+		inc	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpF6:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ex	af,af'
+		inc	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpEE:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ld	a,d
+		cp	CPU_IO
+		jp	nc,CpuSlowM3
+		ex	de,hl
+		ex	af,af'
+		inc	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpFE:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,b
+		ld	e,a
+		jr	nc,Cl81
+		inc	l
+	Cl81:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ld	a,d
+		cp	CPU_IO
+		jp	nc,CpuSlowM3
+		ex	de,hl
+		ex	af,af'
+		inc	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpC6:
+		ld	l,e
+		ld	h,CPU_ZP
+		ex	af,af'
+		dec	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpD6:
+		ld	a,e
+		add	a,b
+		ld	l,a
+		ld	h,CPU_ZP
+		ex	af,af'
+		dec	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpCE:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ld	a,d
+		cp	CPU_IO
+		jp	nc,CpuSlowM3
+		ex	de,hl
+		ex	af,af'
+		dec	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpDE:
+		pop	hl
+		dec	sp
+		ld	a,e
+		add	a,b
+		ld	e,a
+		jr	nc,Cl82
+		inc	l
+	Cl82:
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ld	a,d
+		cp	CPU_IO
+		jp	nc,CpuSlowM3
+		ex	de,hl
+		ex	af,af'
+		dec	(hl)
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpE8:
+		dec	sp
+		ex	af,af'
+		inc	b
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpC8:
+		dec	sp
+		ex	af,af'
+		inc	c
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpCA:
+		dec	sp
+		ex	af,af'
+		dec	b
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp88:
+		dec	sp
+		ex	af,af'
+		dec	c
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpAA:
+		dec	sp
+		ex	af,af'
+		ld	b,a
+		inc	b
+		dec	b
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpA8:
+		dec	sp
+		ex	af,af'
+		ld	c,a
+		inc	c
+		dec	c
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp8A:
+		dec	sp
+		ex	af,af'
+		ld	a,b
+		inc	a
+		dec	a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp98:
+		dec	sp
+		ex	af,af'
+		ld	a,c
+		inc	a
+		dec	a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpBA:
+		dec	sp
+		ld	a,(CpuS)
+		ld	b,a
+		ex	af,af'
+		inc	b
+		dec	b
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp9A:
+		dec	sp
+		ld	a,b
+		ld	(CpuS),a
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp18:
+		dec	sp
+		ex	af,af'
+		scf
+		ccf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp38:
+		dec	sp
+		ex	af,af'
+		scf
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp58:
+		dec	sp
+		xor	a
+		ld	(CpuIF),a
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp78:
+		dec	sp
+		ld	a,1
+		ld	(CpuIF),a
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpB8:
+		dec	sp
+		xor	a
+		ld	(CpuVF),a
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpD8:
+		dec	sp
+		xor	a
+		jp	CpuSetD
+	CpuOpF8:
+		dec	sp
+		ld	a,1
+		jp	CpuSetD
+	CpuOpEA:
+		dec	sp
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp48:
+		dec	sp
+		ld	a,(CpuS)
+		ld	l,a
+		ld	h,CPU_STK
+		ex	af,af'
+		ld	(hl),a
+		ex	af,af'
+		dec	l
+		ld	a,l
+		ld	(CpuS),a
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp68:
+		dec	sp
+		ld	a,(CpuS)
+		inc	a
+		ld	(CpuS),a
+		ld	l,a
+		ld	h,CPU_STK
+		ex	af,af'
+		ld	a,(hl)
+		inc	a
+		dec	a
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp08:
+		dec	sp
+		jp	CpuPhp
+	CpuOp28:
+		dec	sp
+		ld	a,(CpuS)
+		inc	a
+		ld	(CpuS),a
+		ld	l,a
+		ld	h,CPU_STK
+		ld	a,(hl)
+		jp	CpuPlp
+	CpuOp40:
+		dec	sp
+		ld	a,(CpuS)
+		inc	a
+		ld	l,a
+		ld	h,CPU_STK
+		ld	a,(hl)
+		ld	(CpuRtiP),a
+		inc	l
+		ld	a,(hl)
+		ld	(CpuRtiLo),a
+		inc	l
+		ld	a,(hl)
+		ld	(CpuRtiHi),a
+		ld	a,l
+		ld	(CpuS),a
+		jp	CpuRti
+	CpuOp4C:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	a,(hl)
+		inc	h
+		ld	(hl),h
+		inc	l
+		ld	(hl),h
+		dec	l
+		ld	h,a
+		ld	a,l
+		sub	h
+		ld	(CpuNDelta),a
+		ld	l,e
+		ld	sp,hl
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp6C:
+		pop	hl
+		dec	sp
+		ld	h,CPU_PT
+		ld	d,(hl)
+		inc	h
+		ld	(hl),h
+		ex	de,hl
+		ld	e,(hl)
+		inc	l
+		ld	l,(hl)
+		ld	h,CPU_PT
+		ld	a,(hl)
+		inc	h
+		ld	(hl),h
+		inc	l
+		ld	(hl),h
+		dec	l
+		ld	h,a
+		ld	a,l
+		sub	h
+		ld	(CpuNDelta),a
+		ld	l,e
+		ld	sp,hl
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp20:
+		pop	hl
+		dec	sp
+		ld	d,l
+		ld	hl,-1
+		add	hl,sp
+		ld	a,(CpuNDelta)
+		add	a,h
+		ld	h,a
+		ld	(CpuTmp),hl
+		ld	a,(CpuS)
+		ld	l,a
+		ld	h,CPU_STK
+		ld	a,(CpuTmp+1)
+		ld	(hl),a
+		dec	l
+		ld	a,(CpuTmp)
+		ld	(hl),a
+		dec	l
+		ld	a,l
+		ld	(CpuS),a
+		ld	l,d
+		ld	h,CPU_PT
+		ld	a,(hl)
+		inc	h
+		ld	(hl),h
+		inc	l
+		ld	(hl),h
+		dec	l
+		ld	h,a
+		ld	a,l
+		sub	h
+		ld	(CpuNDelta),a
+		ld	l,e
+		ld	sp,hl
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp60:
+		ld	a,(CpuS)
+		inc	a
+		ld	l,a
+		ld	h,CPU_STK
+		ld	e,(hl)
+		inc	l
+		ld	d,(hl)
+		ld	a,l
+		ld	(CpuS),a
+		inc	de
+		ld	l,d
+		ld	h,CPU_PT
+		ld	a,(hl)
+		inc	h
+		ld	(hl),h
+		inc	l
+		ld	(hl),h
+		dec	l
+		ld	h,a
+		ld	a,l
+		sub	h
+		ld	(CpuNDelta),a
+		ld	l,e
+		ld	sp,hl
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuRtiJmp:
+		ld	h,CPU_PT
+		ld	a,(hl)
+		inc	h
+		ld	(hl),h
+		inc	l
+		ld	(hl),h
+		dec	l
+		ld	h,a
+		ld	a,l
+		sub	h
+		ld	(CpuNDelta),a
+		ld	l,e
+		ld	sp,hl
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp10:
+		ex	af,af'
+		jp	p,Cb83
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cb83:
+		ex	af,af'
+		ld	l,e
+		ld	a,e
+		rla
+		sbc	a,a
+		ld	h,a
+		add	hl,sp
+		ld	sp,hl
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp30:
+		ex	af,af'
+		jp	m,Cb84
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cb84:
+		ex	af,af'
+		ld	l,e
+		ld	a,e
+		rla
+		sbc	a,a
+		ld	h,a
+		add	hl,sp
+		ld	sp,hl
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp50:
+		ld	a,(CpuVF)
+		or	a
+		jr	z,Cb85
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cb85:
+		ld	l,e
+		ld	a,e
+		rla
+		sbc	a,a
+		ld	h,a
+		add	hl,sp
+		ld	sp,hl
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp70:
+		ld	a,(CpuVF)
+		or	a
+		jr	nz,Cb86
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cb86:
+		ld	l,e
+		ld	a,e
+		rla
+		sbc	a,a
+		ld	h,a
+		add	hl,sp
+		ld	sp,hl
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp90:
+		ex	af,af'
+		jr	nc,Cb87
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cb87:
+		ex	af,af'
+		ld	l,e
+		ld	a,e
+		rla
+		sbc	a,a
+		ld	h,a
+		add	hl,sp
+		ld	sp,hl
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpB0:
+		ex	af,af'
+		jr	c,Cb88
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cb88:
+		ex	af,af'
+		ld	l,e
+		ld	a,e
+		rla
+		sbc	a,a
+		ld	h,a
+		add	hl,sp
+		ld	sp,hl
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpD0:
+		ex	af,af'
+		jr	nz,Cb89
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cb89:
+		ex	af,af'
+		ld	l,e
+		ld	a,e
+		rla
+		sbc	a,a
+		ld	h,a
+		add	hl,sp
+		ld	sp,hl
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOpF0:
+		ex	af,af'
+		jr	z,Cb90
+		ex	af,af'
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	Cb90:
+		ex	af,af'
+		ld	l,e
+		ld	a,e
+		rla
+		sbc	a,a
+		ld	h,a
+		add	hl,sp
+		ld	sp,hl
+		pop	hl
+		ld	e,h
+		ld	h,CPU_JTL
+		ld	a,(hl)
+		inc	h
+		ld	h,(hl)
+		ld	l,a
+		jp	(hl)
+	CpuOp00:
+		jp	CpuStop
+	CpuSlowA2:
+		ex	af,af'
+		ld	(CpuSVal),a
+		ex	af,af'
+		ld	a,2
+		ld	(CpuSLen),a
+		jp	CpuSlowSt
+	CpuSlowA3:
+		ex	af,af'
+		ld	(CpuSVal),a
+		ex	af,af'
+		ld	a,3
+		ld	(CpuSLen),a
+		jp	CpuSlowSt
+	CpuSlowX2:
+		ld	a,b
+		ld	(CpuSVal),a
+		ld	a,2
+		ld	(CpuSLen),a
+		jp	CpuSlowSt
+	CpuSlowX3:
+		ld	a,b
+		ld	(CpuSVal),a
+		ld	a,3
+		ld	(CpuSLen),a
+		jp	CpuSlowSt
+	CpuSlowY2:
+		ld	a,c
+		ld	(CpuSVal),a
+		ld	a,2
+		ld	(CpuSLen),a
+		jp	CpuSlowSt
+	CpuSlowY3:
+		ld	a,c
+		ld	(CpuSVal),a
+		ld	a,3
+		ld	(CpuSLen),a
+		jp	CpuSlowSt
+	CpuSlowM2:
+		ld	a,2
+		ld	(CpuSLen),a
+		jp	CpuSlowRmw
+	CpuSlowM3:
+		ld	a,3
+		ld	(CpuSLen),a
+		jp	CpuSlowRmw
+;	------------------------------------------------ ugrotabla-forras (CpuInit szetvalogatja CPU_JTL/JTH-ba)
+	CpuJtForras:
+		dw	CpuOp00, CpuOp01, CpuIllegal, CpuIllegal, CpuIllegal, CpuOp05, CpuOp06, CpuIllegal
+		dw	CpuOp08, CpuOp09, CpuOp0A, CpuIllegal, CpuIllegal, CpuOp0D, CpuOp0E, CpuIllegal
+		dw	CpuOp10, CpuOp11, CpuIllegal, CpuIllegal, CpuIllegal, CpuOp15, CpuOp16, CpuIllegal
+		dw	CpuOp18, CpuOp19, CpuIllegal, CpuIllegal, CpuIllegal, CpuOp1D, CpuOp1E, CpuIllegal
+		dw	CpuOp20, CpuOp21, CpuIllegal, CpuIllegal, CpuOp24, CpuOp25, CpuOp26, CpuIllegal
+		dw	CpuOp28, CpuOp29, CpuOp2A, CpuIllegal, CpuOp2C, CpuOp2D, CpuOp2E, CpuIllegal
+		dw	CpuOp30, CpuOp31, CpuIllegal, CpuIllegal, CpuIllegal, CpuOp35, CpuOp36, CpuIllegal
+		dw	CpuOp38, CpuOp39, CpuIllegal, CpuIllegal, CpuIllegal, CpuOp3D, CpuOp3E, CpuIllegal
+		dw	CpuOp40, CpuOp41, CpuIllegal, CpuIllegal, CpuIllegal, CpuOp45, CpuOp46, CpuIllegal
+		dw	CpuOp48, CpuOp49, CpuOp4A, CpuIllegal, CpuOp4C, CpuOp4D, CpuOp4E, CpuIllegal
+		dw	CpuOp50, CpuOp51, CpuIllegal, CpuIllegal, CpuIllegal, CpuOp55, CpuOp56, CpuIllegal
+		dw	CpuOp58, CpuOp59, CpuIllegal, CpuIllegal, CpuIllegal, CpuOp5D, CpuOp5E, CpuIllegal
+		dw	CpuOp60, CpuOp61, CpuIllegal, CpuIllegal, CpuIllegal, CpuOp65, CpuOp66, CpuIllegal
+		dw	CpuOp68, CpuOp69, CpuOp6A, CpuIllegal, CpuOp6C, CpuOp6D, CpuOp6E, CpuIllegal
+		dw	CpuOp70, CpuOp71, CpuIllegal, CpuIllegal, CpuIllegal, CpuOp75, CpuOp76, CpuIllegal
+		dw	CpuOp78, CpuOp79, CpuIllegal, CpuIllegal, CpuIllegal, CpuOp7D, CpuOp7E, CpuIllegal
+		dw	CpuIllegal, CpuOp81, CpuIllegal, CpuIllegal, CpuOp84, CpuOp85, CpuOp86, CpuIllegal
+		dw	CpuOp88, CpuIllegal, CpuOp8A, CpuIllegal, CpuOp8C, CpuOp8D, CpuOp8E, CpuIllegal
+		dw	CpuOp90, CpuOp91, CpuIllegal, CpuIllegal, CpuOp94, CpuOp95, CpuOp96, CpuIllegal
+		dw	CpuOp98, CpuOp99, CpuOp9A, CpuIllegal, CpuIllegal, CpuOp9D, CpuIllegal, CpuIllegal
+		dw	CpuOpA0, CpuOpA1, CpuOpA2, CpuIllegal, CpuOpA4, CpuOpA5, CpuOpA6, CpuIllegal
+		dw	CpuOpA8, CpuOpA9, CpuOpAA, CpuIllegal, CpuOpAC, CpuOpAD, CpuOpAE, CpuIllegal
+		dw	CpuOpB0, CpuOpB1, CpuIllegal, CpuIllegal, CpuOpB4, CpuOpB5, CpuOpB6, CpuIllegal
+		dw	CpuOpB8, CpuOpB9, CpuOpBA, CpuIllegal, CpuOpBC, CpuOpBD, CpuOpBE, CpuIllegal
+		dw	CpuOpC0, CpuOpC1, CpuIllegal, CpuIllegal, CpuOpC4, CpuOpC5, CpuOpC6, CpuIllegal
+		dw	CpuOpC8, CpuOpC9, CpuOpCA, CpuIllegal, CpuOpCC, CpuOpCD, CpuOpCE, CpuIllegal
+		dw	CpuOpD0, CpuOpD1, CpuIllegal, CpuIllegal, CpuIllegal, CpuOpD5, CpuOpD6, CpuIllegal
+		dw	CpuOpD8, CpuOpD9, CpuIllegal, CpuIllegal, CpuIllegal, CpuOpDD, CpuOpDE, CpuIllegal
+		dw	CpuOpE0, CpuOpE1, CpuIllegal, CpuIllegal, CpuOpE4, CpuOpE5, CpuOpE6, CpuIllegal
+		dw	CpuOpE8, CpuOpE9, CpuOpEA, CpuIllegal, CpuOpEC, CpuOpED, CpuOpEE, CpuIllegal
+		dw	CpuOpF0, CpuOpF1, CpuIllegal, CpuIllegal, CpuIllegal, CpuOpF5, CpuOpF6, CpuIllegal
+		dw	CpuOpF8, CpuOpF9, CpuIllegal, CpuIllegal, CpuIllegal, CpuOpFD, CpuOpFE, CpuIllegal
+;	decimalis (SED) valtozatok: opkod, normal, BCD
+	CpuBcdLista:
+		db	$61
+		dw	CpuOp61, CpuBcd61
+		db	$65
+		dw	CpuOp65, CpuBcd65
+		db	$69
+		dw	CpuOp69, CpuBcd69
+		db	$6D
+		dw	CpuOp6D, CpuBcd6D
+		db	$71
+		dw	CpuOp71, CpuBcd71
+		db	$75
+		dw	CpuOp75, CpuBcd75
+		db	$79
+		dw	CpuOp79, CpuBcd79
+		db	$7D
+		dw	CpuOp7D, CpuBcd7D
+		db	$E1
+		dw	CpuOpE1, CpuBcdE1
+		db	$E5
+		dw	CpuOpE5, CpuBcdE5
+		db	$E9
+		dw	CpuOpE9, CpuBcdE9
+		db	$ED
+		dw	CpuOpED, CpuBcdED
+		db	$F1
+		dw	CpuOpF1, CpuBcdF1
+		db	$F5
+		dw	CpuOpF5, CpuBcdF5
+		db	$F9
+		dw	CpuOpF9, CpuBcdF9
+		db	$FD
+		dw	CpuOpFD, CpuBcdFD
+		db	0
+	CpuKodVege:
+	");
+end;

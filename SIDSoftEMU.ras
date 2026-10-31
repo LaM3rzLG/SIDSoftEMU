@@ -20,6 +20,11 @@ var
 	IrasNev		:	array[24] of byte = (23, $53, $49, $44, $5F, $54, $56, $43, $5C, $4C, $4E, $49, $4E, $4A, $41, $5C, $49, $52, $41, $53, $2E, $53, $54, $43);	/* proba: "SID_TVC\\LNINJA\\IRAS.STC" */
 	Kod, Dal, Hiba	:	byte;
 	IrEredm		:	array[8] of byte;	/* iraspoba: A, F a $53 utan; BC a 2 iras utan; A, F a $54 utan */
+	SidNev		:	array[15] of byte = (14, $53, $49, $44, $5C, $4C, $4E, $49, $4E, $4A, $41, $2E, $53, $49, $44);	/* "SID\\LNINJA.SID" */
+	SidFej		:	array[130] of byte;		/* a .sid fejlece (big-endian mezok) */
+	SidPuffer	:	array[1024] of byte;	/* betolteskor: darabok, innen masoljuk a helyukre ($B0 lapozassal) */
+
+@include "cpu6502.ras"
 
 /* ---------------------------------------------------------------- betoltes (ROM-mal, a menubol) */
 procedure Betolt();
@@ -108,6 +113,218 @@ begin
 		push	af
 		pop	hl
 		ld	(IrEredm+6),hl
+	");
+end;
+
+/* ---------------------------------------------------------------- .sid betoltese: SID\NEV.SID -> SID_IMG lap
+   A fejlec a SidFej-be; az adat 1 KB-os darabokban a SidPuffer-be, onnan ($B0) a helyere (a kep a
+   (betoltesi cim & $FF)-tol kezdodik a SID_IMG lapon). Eredmeny: SidLoad, SidHossz, Hiba (0 = jo). */
+procedure SidBetolt();
+begin
+	asm("
+SID_IMG	EQU	$58
+		xor	a
+		ld	(Hiba),a
+		ld	($0B0A),a
+		ld	de,SidNev
+		rst	$30
+		db	$D3
+		jr	z,SbNyitva
+		ld	a,1
+		ld	(Hiba),a
+		ret
+	SbNyitva:
+		ld	de,SidFej
+		ld	bc,8
+		rst	$30
+		db	$D2
+		ld	a,(SidFej+6)		;	adat eltolas (big-endian)
+		ld	h,a
+		ld	a,(SidFej+7)
+		ld	l,a
+		ld	de,-8
+		add	hl,de
+		ld	b,h
+		ld	c,l
+		ld	de,SidFej+8
+		rst	$30
+		db	$D2
+		ld	a,(SidFej+8)		;	betoltesi cim (big-endian), 0 = az adat elso 2 byte-ja
+		ld	h,a
+		ld	a,(SidFej+9)
+		ld	l,a
+		ld	(SidLoad),hl
+		ld	a,h
+		or	l
+		jr	nz,SbCim
+		ld	de,SidLoad
+		ld	bc,2
+		rst	$30
+		db	$D2
+	SbCim:
+		ld	a,(SidLoad)
+		ld	l,a
+		ld	h,SID_IMG
+		ld	(SbCel),hl
+		ld	hl,0
+		ld	(SidHossz),hl
+	SbDarab:
+		ld	de,SidPuffer
+		ld	bc,1024
+		rst	$30
+		db	$D2
+		ld	hl,1024
+		or	a
+		sbc	hl,bc
+		ld	(SbKapott),hl
+		ld	a,h
+		or	l
+		jr	z,SbVege
+		ld	b,h
+		ld	c,l
+		di
+		ld	a,$B0
+		out	($02),a
+		ld	hl,SidPuffer
+		ld	de,(SbCel)
+		ldir
+		ld	(SbCel),de
+		ld	a,($0003)
+		out	($02),a
+		ei
+		ld	hl,(SidHossz)
+		ld	de,(SbKapott)
+		add	hl,de
+		ld	(SidHossz),hl
+		ld	hl,(SbKapott)
+		ld	de,1024
+		or	a
+		sbc	hl,de
+		jr	z,SbDarab
+	SbVege:
+		xor	a
+		rst	$30
+		db	$D4
+		ret
+	SbCel:
+		dw	0
+	SbKapott:
+		dw	0
+	SidLoad:
+		dw	0
+	SidHossz:
+		dw	0
+	");
+end;
+
+/* ---------------------------------------------------------------- 3. lepes, PROBA: 6502-emu a TVC-n (T gomb)
+   init (aldal 3) + 1500 x play. Kepkockankent a SID-irasok ellenorzoosszege (c = rotl16(c) xor (reg*256+ert))
+   a kepernyo-RAM-ba ($8000-tol, 2 byte; a 0. = az init). Keret sarga = szamol. Eredmeny: TesztN, CpuErr. */
+procedure CpuTeszt();
+begin
+	asm("
+		di
+		ld	a,$B0
+		out	($02),a
+		ld	a,168
+		out	($00),a
+		ld	a,SID_IMG
+		ld	(CpuImgLap),a
+		ld	a,(SidLoad+1)
+		ld	(CpuImg6502),a
+		ld	hl,(SidHossz)
+		ld	a,(SidLoad)
+		ld	e,a
+		ld	d,0
+		add	hl,de
+		ld	de,255
+		add	hl,de
+		ld	a,h
+		ld	(CpuImgDb),a
+		add	a,SID_IMG
+		ld	(CpuPoolMin),a
+		call	CpuInit
+		ld	hl,$8000
+		ld	(TesztP),hl
+		ld	hl,0
+		ld	(TesztN),hl
+		ld	a,(SidFej+10)		;	init
+		ld	(CpuCim+1),a
+		ld	a,(SidFej+11)
+		ld	(CpuCim),a
+		ld	a,2
+		ld	(CpuA),a
+		call	CtHiv
+	CtKor:
+		ld	a,(CpuErr)
+		or	a
+		jr	nz,CtVege
+		ld	a,(SidFej+12)		;	play
+		ld	(CpuCim+1),a
+		ld	a,(SidFej+13)
+		ld	(CpuCim),a
+		xor	a
+		ld	(CpuA),a
+		call	CtHiv
+		ld	hl,(TesztN)
+		inc	hl
+		ld	(TesztN),hl
+		ld	de,1500
+		or	a
+		sbc	hl,de
+		jr	nz,CtKor
+	CtVege:
+		xor	a
+		out	($00),a
+		ld	a,($0003)
+		out	($02),a
+		ei
+		ret
+
+	;	egy hivas + az ellenorzoosszeg a kepernyo-RAM-ba
+	CtHiv:
+		xor	a
+		ld	(CpuLogN),a
+		ld	hl,CpuLog
+		ld	(CpuLogP),hl
+		call	CpuHiv
+		ld	hl,0
+		ld	a,(CpuLogN)
+		or	a
+		jr	z,CtCsVeg
+		ld	b,a
+		ld	de,CpuLog
+	CtCs:
+		add	hl,hl
+		jr	nc,CtCs1
+		inc	l
+	CtCs1:
+		ld	a,(de)
+		xor	h
+		ld	h,a
+		inc	de
+		ld	a,(de)
+		xor	l
+		ld	l,a
+		inc	de
+		djnz	CtCs
+	CtCsVeg:
+		ex	de,hl
+		ld	hl,(TesztP)
+		ld	a,$90				;	U0,U1,VID,U3
+		out	($02),a
+		ld	(hl),e
+		inc	hl
+		ld	(hl),d
+		inc	hl
+		ld	a,$B0
+		out	($02),a
+		ld	(TesztP),hl
+		ret
+	TesztP:
+		dw	0
+	TesztN:
+		dw	0
 	");
 end;
 
@@ -551,6 +768,7 @@ end;
 
 begin
 	TVC::SetGraphicsMode(TVC::GRAPHICS4);	/* a hang-IT a port 6-ra GR4 modbitet (1) ir */
+	CpuKod();	/* csak hogy a fordito bent hagyja (azonnal visszater) */
 	Menu();
 	while (true) do
 	begin
@@ -560,6 +778,20 @@ begin
 		if (Kod = $30) then Dal := 10;
 		if (Kod = $41) then Dal := 11;
 		if (Kod = $61) then Dal := 11;
+		if (Kod = $54) then Kod := $74;
+		if (Kod = $74) then
+		begin
+			TVC::WriteAt(2, 18, "SID betoltes...     ");
+			SidBetolt();
+			if (Hiba = 0) then
+			begin
+				TVC::WriteAt(2, 18, "6502 teszt...       ");
+				CpuTeszt();
+				TVC::WriteAt(2, 18, "Teszt kesz          ");
+			end
+			else
+				TVC::WriteAt(2, 18, "Nincs SID fajl!     ");
+		end;
 		if (Kod = $57) then Kod := $77;
 		if (Kod = $77) then
 		begin
