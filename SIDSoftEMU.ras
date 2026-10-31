@@ -17,7 +17,9 @@ program SIDSoftEMU;
 var
 	SidTablak	:	incbin("resources/sid_tablak.bin");		/* 17 lap -> $EF00 */
 	Fajlnev		:	array[22] of byte = (21, $53, $49, $44, $5F, $54, $56, $43, $5C, $4C, $4E, $49, $4E, $4A, $41, $5C, $30, $33, $2E, $53, $54, $43);	/* "SID_TVC\LNINJA\03.STC" - az aldal a 16-17. byte */
+	IrasNev		:	array[24] of byte = (23, $53, $49, $44, $5F, $54, $56, $43, $5C, $4C, $4E, $49, $4E, $4A, $41, $5C, $49, $52, $41, $53, $2E, $53, $54, $43);	/* proba: "SID_TVC\\LNINJA\\IRAS.STC" */
 	Kod, Dal, Hiba	:	byte;
+	IrEredm		:	array[8] of byte;	/* iraspoba: A, F a $53 utan; BC a 2 iras utan; A, F a $54 utan */
 
 /* ---------------------------------------------------------------- betoltes (ROM-mal, a menubol) */
 procedure Betolt();
@@ -75,6 +77,37 @@ begin
 		ret
 	BtHossz:
 		dw	0
+	");
+end;
+
+/* ---------------------------------------------------------------- PROBA: fajliras (W gomb a menuben)
+   2 blokkiras: 2 byte (BtHossz) + 32768 byte a $4000-rol. Eredmeny az IrEredm-ben. */
+procedure IrasProba();
+begin
+	asm("
+		xor	a
+		ld	($0B6B),a			;	mint a TVC::CreateFile
+		ld	de,IrasNev
+		rst	$30
+		db	$53					;	CAS_CRTE
+		push	af
+		pop	hl
+		ld	(IrEredm),hl
+		ld	de,BtHossz
+		ld	bc,2
+		rst	$30
+		db	$52					;	CAS_BKOUT
+		ld	(IrEredm+2),bc
+		ld	de,$4000
+		ld	bc,$8000
+		rst	$30
+		db	$52
+		ld	(IrEredm+4),bc
+		rst	$30
+		db	$54					;	CAS_CLOSE (iras)
+		push	af
+		pop	hl
+		ld	(IrEredm+6),hl
 	");
 end;
 
@@ -524,6 +557,13 @@ begin
 		if (Kod = $30) then Dal := 10;
 		if (Kod = $41) then Dal := 11;
 		if (Kod = $61) then Dal := 11;
+		if (Kod = $57) then Kod := $77;
+		if (Kod = $77) then
+		begin
+			TVC::WriteAt(2, 18, "Iras...             ");
+			IrasProba();
+			TVC::WriteAt(2, 18, "Iras kesz           ");
+		end;
 		if (Dal <> 0) then
 		begin
 			Fajlnev[16] := $30;
