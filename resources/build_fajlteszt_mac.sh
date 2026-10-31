@@ -11,5 +11,4 @@ for f in $(ls sid_tvc/LNINJA1/*.STC sid_tvc/LNINJA3/*.STC 2>/dev/null | sort -V)
   LEMEZ_FAJLOK="$LEMEZ_FAJLOK,'$f=SID_TVC/${f#sid_tvc/}'"
 done
 BETOLTO=FAJLTESZ
-elotte() { pwsh -NoProfile -File resources/font_ge.ps1; }   # font.bin -> font_ge.bin
 source "$KOZOS/mac/build_kozos.sh"

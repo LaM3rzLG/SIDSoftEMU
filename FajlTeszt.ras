@@ -2,41 +2,276 @@ program FajlTeszt;
 @use "GE"
 
 /* FajlTeszt - a SIDSoftEMU mini fajlkezelojenek probaprogramja (2026-10-31), TRSE + GE unit.
-   - Kiiras: GE::WriteText, betukeszlet: resources/font.bin -> font_ge.ps1 -> resources/font_ge.bin (8x7 pont,
-     ASCII 32..122 kis- es nagybetuvel, ekezetek; a \ = 153-as, a _ = 154-es kod, mert a GE a 91..96-ot nem kezeli).
+   - Kiiras: a WaterPumpGame SAJAT szovegkiiroja (Ir: aranyos, pixelszelessegu betuk, 1 bites font), valtozatlanul
+     atveve; csak a sorpuffer lett Ir_Buf (a WPG-ben $1460). Betukeszlet: resources/font.bin (1 byte magassag +
+     109 byte szelesseg + kep; ASCII 32..122 + ekezetek). Ekezet a forrasban Latin-1-gyel; o"/u" helyett o^/u^.
    - Billentyuk: GE::GetKeyboard + GE::Pressed (a nyilak a matrix 8. soraban: JOY1_UP/DOWN/LEFT/RIGHT).
      Nyomva tartva ismetel (elso ismetles 20 kep utan, aztan 3 kepenkent).
    - Mozgaskor csak a regi es az uj sor jele rajzolodik ujra; a teljes lista csak lapozaskor / konyvtarvaltaskor.
-   - Konyvtar: a lemez-ROM FISH hivasa (MOPS rst $30 / $DB; 04H = elso, 05H = kovetkezo bejegyzes) - ez az
-     egy hivas asm (FishHivas), minden mas Pascal. ROM-hivas elott GE::EnableTVCITHandler, utana Disable.
+   - Konyvtar: a lemez-ROM FISH hivasa (MOPS rst $30 / $DB; 04H = elso, 05H = kovetkezo bejegyzes) - FishHivas.
+     ROM-hivas elott GE::EnableTVCITHandler, utana Disable.
    Fel/Le = valasztas, Balra/Jobbra = lapozas, Enter = konyvtarba be / .STC (most csak kiirja), ESC = feljebb. */
 
 var
-	CharSet		:	incbin("resources/font_ge.bin");	/* 210 byte szeles, 7 sor, 105 karakter (font_ge.ps1) */
+	Font_Data	:	incbin("resources/font.bin");
 
 	const LATHATO	: byte = 22;		/* ennyi listasor latszik */
 	const LISTA_Y	: byte = 26;		/* az elso listasor kepsora */
 	const ALLAPOT_Y	: byte = 208;		/* uzenetsor */
+	const NEV_X		: byte = 2;			/* oszlopok (byte = 4 pont) */
+	const MERET_JOBB: byte = 40;		/* a meret jobb szele */
+	const KVT_X		: byte = 30;
 
 	Lista		:	array[4096] of byte;	/* 256 bejegyzes x 16: nev 8, kit. 3, attr 1, meret 4 */
-	MintaFcb		:	array[64] of byte;		/* keresesi minta (????????.???) */
-	TalaltFcb		:	array[64] of byte;		/* a talalt bejegyzes */
+	MintaFcb	:	array[64] of byte;		/* keresesi minta (????????.???) */
+	TalaltFcb	:	array[64] of byte;		/* a talalt bejegyzes */
 	Fpb			:	array[8] of byte;		/* FISH parameterblokk: IX, HL, DE, BC */
 	Ut			:	array[64] of byte;		/* aktualis konyvtar, 0-val zarva; gyoker = \ */
-	Sor			:	array[34] of byte;		/* egy kepernyosor szovege */
-	Nev			:	array[14] of byte;		/* a bejegyzes neve (nev.kit), nyersen */
+	Nev			:	array[14] of byte;		/* a bejegyzes neve (nev.kit) */
+	SzamSz		:	array[8] of byte;		/* szam szovegkent */
 
 	UtHossz, NevHossz, Db, Sel, Top, Regi, HibaKod	:	byte;
 	FishKod, FishHiba	:	byte;
 	Gomb, ElozoGomb, Ismetles	:	byte;
-	i, j, k, b, e, Elso	:	byte;
+	i, j, k, b, y, Elso	:	byte;
 	p			:	^byte;
 	a, Meret	:	integer;
-	/* Latin-1 ekezet ($C0..$DF / $E0..$FF, also 5 bit) -> GE kod (A' 128 .. U" 136; kisbetu +16). A hosszu o/u nincs a
-	   Latin-1-ben, ezert a forrasban o^/u^ (kalapos) all helyettuk: o^ = 133, u^ = 136. 0 = nincs ilyen betu. */
-	EkTab		:	array[32] of byte = (0,128,0,0,0,0,0,0,0,129,0,0,0,130,0,0,
-								 0,0,0,131,133,0,132,0,0,0,134,136,135,0,0,0);
 
+	/* a WaterPumpGame Ir valtozoi */
+	Ir_X							:	byte = 0;		/* be: x (byte); ki: a kovetkezo szabad byte-oszlop */
+	Ir_Y							:	byte = 0;
+	Ir_Szoveg						:	^byte;
+	Ir_Cim							:	integer = 0;
+	Ir_Szel							:	byte = 0;
+	Ir_Hossz						:	byte = 0;		/* az Ir_Hossza eredmenye (byte) */
+	Ir_Px, Ir_Bdb, Ir_H				:	byte = 0;
+	Ir_Sor0, Ir_Dst					:	integer = 0;
+	Ir_Buf							:	array[34] of byte;	/* sorpuffer (a WPG-ben $1460) */
+
+
+/* ---------------------------------------------------------------- SAJAT SZOVEGKIIRO (WaterPumpGame) */
+Procedure Ir(Ir_X, Ir_Y : global byte; Ir_Szoveg : global ^byte);
+	begin
+		asm("
+			ld a,[Ir_Y]
+			ld l,a
+			ld h,0
+			add hl,hl
+			add hl,hl
+			add hl,hl
+			add hl,hl
+			add hl,hl
+			add hl,hl
+			ld de,[GE_ScreenAddr]
+			add hl,de
+			ld a,[Ir_X]
+			ld e,a
+			ld d,0
+			add hl,de
+			ld [Ir_Cim],hl
+			ld [Ir_Dst],hl
+			ld hl,[Ir_Szoveg]
+			call Ir_PxSzel
+			ld [Ir_Bdb],a
+			ld a,[Font_Data]
+			and 15
+			ld [Ir_H],a
+			ld hl,Font_Data+110
+			ld [Ir_Sor0],hl
+			ld a,[Ir_H]
+			ld b,a
+IrSorCiklus:
+			push bc
+			ld hl,Ir_Buf
+			ld b,34
+			xor a
+Ir_Torol:
+			ld (hl),a
+			inc hl
+			djnz Ir_Torol
+			ld [Ir_Px],a
+			ld hl,[Ir_Szoveg]
+Ir_Kar:
+			ld a,(hl)
+			or a
+			jr z,Ir_Kiir
+			inc hl
+			call Ir_Ekezet
+			cp 32
+			jr c,Ir_Kar
+			cp 141
+			jr nc,Ir_Kar
+			sub 32
+			push hl
+			ld e,a
+			ld d,0
+			ld hl,Font_Data+1
+			add hl,de
+			ld a,(hl)
+			or a
+			jr z,Ir_KarVege
+			ld [Ir_Szel],a
+			ld hl,[Ir_Sor0]
+			add hl,de
+			ld d,(hl)
+			ld e,0
+			ld a,[Ir_Px]
+			ld c,a
+			and 7
+			jr z,Ir_NemTol
+			ld b,a
+Ir_Tol:
+			srl d
+			rr e
+			djnz Ir_Tol
+Ir_NemTol:
+			ld a,c
+			rrca
+			rrca
+			rrca
+			and 31
+			ld c,a
+			ld b,0
+			ld hl,Ir_Buf
+			add hl,bc
+			ld a,(hl)
+			or d
+			ld (hl),a
+			inc hl
+			ld a,(hl)
+			or e
+			ld (hl),a
+			ld a,[Ir_Szel]
+			ld c,a
+			ld a,[Ir_Px]
+			add a,c
+			ld [Ir_Px],a
+Ir_KarVege:
+			pop hl
+			jr Ir_Kar
+Ir_Kiir:
+			call IrKiirRut
+			pop bc
+			djnz IrSorCiklus
+			ld a,[Ir_Bdb]
+			ld e,a
+			ld d,0
+			ld hl,[Ir_Cim]
+			add hl,de
+			ld [Ir_Cim],hl
+			ld a,[Ir_X]
+			add a,e
+			ld [Ir_X],a
+			jp Ir_Vege
+IrKiirRut:
+			ld a,[Ir_Bdb]
+			or a
+			jr z,IrSorVege
+			ld b,a
+			ld hl,Ir_Buf
+			ld de,[Ir_Dst]
+Ir_Byte:
+			ld a,(hl)
+			and $F0
+			ld (de),a
+			inc de
+			dec b
+			jr z,IrSorVege
+			ld a,(hl)
+			rlca
+			rlca
+			rlca
+			rlca
+			and $F0
+			ld (de),a
+			inc de
+			inc hl
+			djnz Ir_Byte
+IrSorVege:
+			ld hl,[Ir_Dst]
+			ld de,64
+			add hl,de
+			ld [Ir_Dst],hl
+			ld hl,[Ir_Sor0]
+			ld de,109
+			add hl,de
+			ld [Ir_Sor0],hl
+			ret
+Ir_PxSzel:
+			ld c,0
+Ir_PKov:
+			ld a,(hl)
+			or a
+			jr z,Ir_PVege
+			inc hl
+			call Ir_Ekezet
+			cp 32
+			jr c,Ir_PKov
+			cp 141
+			jr nc,Ir_PKov
+			sub 32
+			push hl
+			ld e,a
+			ld d,0
+			ld hl,Font_Data+1
+			add hl,de
+			ld a,(hl)
+			add a,c
+			ld c,a
+			pop hl
+			jr Ir_PKov
+Ir_PVege:
+			ld l,c
+			ld h,0
+			inc hl
+			inc hl
+			inc hl
+			srl h
+			rr l
+			srl h
+			rr l
+			ld a,l
+			ret
+; Ekezetes betu: a forras Latin-1 kodja ($C0..$FF) -> a font kodja (123..140); ismeretlen -> 0 (kimarad).
+; A hosszu o es u (o, u ketto vesszovel) nincs a Latin-1-ben: a forrasban o^/u^ (kalapos) all helyettuk. A: a karakter; HL marad, DE romlik.
+Ir_Ekezet:
+			cp $C0
+			ret c
+			push hl
+			sub $C0
+			ld d,a
+			and $1F
+			ld e,a
+			ld a,d
+			ld d,0
+			ld hl,Ir_EkTab
+			add hl,de
+			ld e,a
+			ld a,(hl)
+			or a
+			jr z,Ir_EkX
+			bit 5,e
+			jr z,Ir_EkX
+			add a,9
+Ir_EkX:
+			pop hl
+			ret
+Ir_EkTab:
+			db 0,123,0,0,0,0,0,0,0,124,0,0,0,125,0,0
+			db 0,0,0,126,128,0,127,0,0,0,129,131,130,0,0,0
+Ir_Vege:
+		");
+	end;
+
+/* Egy szöveg szélessége byte-ban (a betűk szélességének összege) -> Ir_Hossz */
+Procedure Ir_Hossza(Ir_Szoveg : global ^byte);
+	begin
+		asm("
+			ld hl,[Ir_Szoveg]
+			call Ir_PxSzel
+			ld [Ir_Hossz],a
+		");
+	end;
 
 /* ---------------------------------------------------------------- az egyetlen asm: FISH-hivas
    C = FishKod (04H elso / 05H kovetkezo keresese), DE -> FPB {IX = 0, HL = ut, DE = MintaFcb, BC = TalaltFcb};
@@ -118,68 +353,7 @@ begin
 end;
 
 
-/* b (ASCII / Latin-1) -> a GE kodja a font_ge.bin-ben */
-procedure Atkod();
-begin
-	if (b >= $C0) then
-	begin
-		e := b & 31;
-		if (EkTab[e] = 0) then b := 63
-		else
-		if (b >= $E0) then b := EkTab[e] + 16
-		else b := EkTab[e];
-	end
-	else
-	if (b = 92) then b := 153		/* \ : a font_ge.bin vegen */
-	else
-	if (b = 95) then b := 154		/* _ */
-	else
-	if (b > 122) then b := 63		/* ? */
-	else
-	if (b > 90) then
-		if (b < 97) then b := 63;
-end;
-
-
-/* Sor := 31 szokoz */
-procedure SorUres();
-begin
-	k := 0;
-	while (k < 31) do
-	begin
-		Sor[k] := 32;
-		k := k + 1;
-	end;
-	Sor[31] := 0;
-end;
-
-
-/* szoveg -> Sor[k..], k = a vege */
-procedure SzovegBe(szoveg : ^byte);
-begin
-	j := 0;
-	while (szoveg[j] <> 0) do
-	begin
-		b := szoveg[j];
-		Atkod();
-		Sor[k] := b;
-		k := k + 1;
-		j := j + 1;
-	end;
-end;
-
-
-/* szoveg kiirasa (x byte, y kepsor), atkodolva (ekezetek) */
-procedure Ir(x, y : byte; szoveg : ^byte);
-begin
-	k := 0;
-	SzovegBe(szoveg);
-	Sor[k] := 0;
-	GE::WriteText(x, y, #Sor);
-end;
-
-
-/* Meret -> Sor[k..k+4], jobbra igazitva */
+/* Meret -> SzamSz (vezeto nullak nelkul) */
 procedure Jegy(oszto : integer);
 begin
 	b := 48;
@@ -188,18 +362,17 @@ begin
 		Meret := Meret - oszto;
 		b := b + 1;
 	end;
-	if (b = 48) then
+	if (b <> 48) then Elso := 0;
+	if (Elso = 0) then
 	begin
-		if (Elso = 1) then b := 32;
-	end
-	else
-		Elso := 0;
-	Sor[k] := b;
-	k := k + 1;
+		SzamSz[k] := b;
+		k := k + 1;
+	end;
 end;
 
 procedure SzamIr();
 begin
+	k := 0;
 	Elso := 1;
 	Jegy(10000);
 	Jegy(1000);
@@ -207,37 +380,21 @@ begin
 	Jegy(10);
 	Elso := 0;
 	Jegy(1);
+	SzamSz[k] := 0;
 end;
 
 
 /* ---------------------------------------------------------------- kepernyo */
-/* n-edik bejegyzes sora -> Sor */
-procedure SorEpit(n : byte);
+/* a lista n-edik bejegyzese az y kepsorba */
+procedure SorRajz(n : byte);
 begin
-	SorUres();
-	if (n = Sel) then Sor[0] := 62;		/* > */
+	GE::FillRect(0, y, 64, 8, 0);
+	if (n = Sel) then Ir(0, y, ">");
 	BejCim(n);
 	NevMasol();
-	k := 0;
-	while (k < NevHossz) do
-	begin
-		b := Nev[k];
-		Atkod();
-		Sor[k + 1] := b;
-		k := k + 1;
-	end;
+	Ir(NEV_X, y, #Nev);
 	if ((p[11] & 16) <> 0) then
-	begin
-		/* konyvtar */
-		k := 0;
-		while (k < 10) do
-		begin
-			Sor[k + 16] := 32;
-			k := k + 1;
-		end;
-		k := 16;
-		SzovegBe("<Könyvtár>");
-	end
+		Ir(KVT_X, y, "<Könyvtár>")
 	else
 	begin
 		/* meret KB-ban, felfele kerekitve: (b1 >> 2) + b2 * 64 */
@@ -249,9 +406,10 @@ begin
 		b := p[13] & 3;
 		if (p[12] <> 0) then b := 1;
 		if (b <> 0) then Meret := Meret + 1;
-		k := 17;
 		SzamIr();
-		SzovegBe(" KB");
+		Ir_Hossza(#SzamSz);
+		Ir(MERET_JOBB - Ir_Hossz, y, #SzamSz);
+		Ir(MERET_JOBB + 1, y, "KB");
 	end;
 end;
 
@@ -261,26 +419,21 @@ begin
 	i := 0;
 	while (i < LATHATO) do
 	begin
+		y := LISTA_Y + i * 8;
 		a := Top;
 		a := a + i;
 		if (a < Db) then
-		begin
-			SorEpit(Top + i);
-			GE::WriteText(0, LISTA_Y + i * 8, #Sor);
-		end
+			SorRajz(Top + i)
 		else
-			GE::FillRect(0, LISTA_Y + i * 8, 64, 8, 0);
+			GE::FillRect(0, y, 64, 8, 0);
 		i := i + 1;
 	end;
 	if (Db = 0) then
 	begin
-		SorUres();
-		k := 0;
-		SzovegBe("(üres) hiba:");
+		Ir(NEV_X, LISTA_Y, "(üres) hiba: ");
 		Meret := HibaKod;
-		k := 11;
 		SzamIr();
-		GE::WriteText(2, LISTA_Y, #Sor);
+		Ir(Ir_X, LISTA_Y, #SzamSz);
 	end;
 end;
 
@@ -296,21 +449,8 @@ procedure Rajz();
 begin
 	GE::ClearScreen(GE::GR4_COLOR0);
 	Ir(0, 0, "SIDSoftEMU - fájlkezelô (teszt)");
-	/* az ut */
-	SorUres();
-	k := 0;
-	while (k < UtHossz) do
-	begin
-		if (k < 31) then
-		begin
-			b := Ut[k];
-			Atkod();
-			Sor[k] := b;
-		end;
-		k := k + 1;
-	end;
-	GE::WriteText(0, 11, #Sor);
-	Ir(0, 222, "Fel/Le, Balra/Jobbra: lapozás");
+	Ir(0, 11, #Ut);
+	Ir(0, 222, "Fel/Le: választás, Balra/Jobbra: lapozás");
 	Ir(0, 231, "Enter: megnyitás, ESC: vissza");
 	ListaRajz();
 end;
@@ -387,8 +527,8 @@ begin
 	else
 	begin
 		/* csak a jelek */
-		GE::WriteText(0, LISTA_Y + (Regi - Top) * 8, " ");
-		GE::WriteText(0, LISTA_Y + (Sel - Top) * 8, ">");
+		Ir(0, LISTA_Y + (Regi - Top) * 8, " ");
+		Ir(0, LISTA_Y + (Sel - Top) * 8, ">");
 	end;
 end;
 
@@ -455,19 +595,8 @@ begin
 		Allapot("Csak .STC fájl játszható");
 		return;
 	end;
-	SorUres();
-	k := 0;
-	SzovegBe("Szólna: ");
-	k := 0;
-	while (k < NevHossz) do
-	begin
-		b := Nev[k];
-		Atkod();
-		Sor[k + 8] := b;
-		k := k + 1;
-	end;
-	GE::FillRect(0, ALLAPOT_Y, 64, 8, 0);
-	GE::WriteText(0, ALLAPOT_Y, #Sor);
+	Allapot("Szólna: ");
+	Ir(Ir_X, ALLAPOT_Y, #Nev);
 end;
 
 
@@ -516,7 +645,6 @@ begin
 	GE::SetPalette(2, GE::PALETTE_RED);
 	GE::SetPalette(3, GE::PALETTE_YELLOW);
 	GE::SetBorder(GE::BORDER_BLACK);
-	GE::InitCharSet(#CharSet, 210, 2, 7);
 
 	Ut[0] := 92;		/* \ */
 	Ut[1] := 0;
