@@ -33,7 +33,7 @@ Testvérprojektek és minták: `../Ugh`, `../WaterPumpGame`.
 Magyarul, tömören; a lemez az igazság; `.bak_<név>` minden változtatás előtt; kétértelmű kérésnél az értelmezést egy
 mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
 
-## SID-fájl lejátszás (2026-10-31, ep128emu-ben fut, a felhasználó még nem hallgatta meg)
+## SID-fájl lejátszás (2026-10-31, ep128emu-ben fut; a felhasználó: "működik, elég jól szól, lehetne jobb" - szünet)
 - `sid/Last_Ninja.sid` (HVSC, 11 aldal). PC: `python3 tools/sid2tvc.py sid/Last_Ninja.sid <aldal>` = 6502-emu
   (`tools/m6502.py`, `sid_dump.py`: hurok a teljes memória ismétlődéséből) -> SID-ADSR szimuláció -> hangonként
   (lépés, szelet, PW) -> hangonként külön, visszahivatkozásos (REF) folyam -> `dalok/DALnn.BIN` + pontos WAV
@@ -45,6 +45,8 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   port 5, CRTC R10/R11 = 3) és a menübe. Dekódoló asm-ben: zöld sáv ~2-3%.
 - Méretek: 26-41 KB; **az 5. aldal 47 KB, nem fér el** (nincs a lemezen) - jobb tömörítés kell (pl. 2 szintű REF).
   A 2. és 9. aldalnak 10 percen belül nincs hurka (10 perc után elölről).
+- Folytatási ötletek: hangminőség (szűrő közelítése táblával, finomabb szintek/keverés, zaj), 5. aldal
+  tömörítése, más .sid-ek kipróbálása, dal neve a fájlból a menüben.
 
 ## Állapot (2026-10-31, munkamenet lezárva - új projekt jött)
 - **4 változatos teszt kész és fut** (ep128emu): `SIDSoftEMU.ras`, 1..4 gomb élőben vált; táblák 15,5 KB az U3-ban
