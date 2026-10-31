@@ -85,6 +85,9 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   Előbb a szöveg téglalapja fekete, aztán betűnként minden sor OR-ral a képre; páratlan pontnál bal pont >>1 (bit 7,5,3,1
   -> 6,4,2,0), jobb pont <<1 a következő byte-ba. ~99 000 T egy 22 betűs sorra (menühöz elég). Build:
   `bash resources/build_ir16teszt_mac.sh`, `load"IR16TESZ"`. A fontban a „C”-n 9/10-es színű pontok vannak (a rajzban).
+- **FajlTeszt16 (2026-10-31, freeTVC-ben kipróbálva):** a FajlTeszt GRAPHICS16-ban, Ir16 + font16.bin; 14 sor, sorköz 12,
+  oszlop = byte = 2 pont; build `bash resources/build_fajlteszt16_mac.sh`, `load"FAJLT16"`. freeTVC: `--disk-card --disk-rom 1.2`
+  kell (a HBF-ROM-mal a FISH-lista üres, hiba 255).
 - Folytatási ötletek: hangminőség (szűrő közelítése táblával, finomabb szintek/keverés, zaj), 5. aldal
   tömörítése, más .sid-ek kipróbálása, dal neve a fájlból a menüben.
 
