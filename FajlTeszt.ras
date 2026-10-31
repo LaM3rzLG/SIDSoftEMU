@@ -1,0 +1,540 @@
+program FajlTeszt;
+@use "GE"
+
+/* FajlTeszt - a SIDSoftEMU mini fajlkezelojenek probaprogramja (2026-10-31), TRSE + GE unit.
+   - Kiiras: GE::WriteText, a WaterPumpGame regi GE-s betukeszlete (resources/CharSetGR4.bin: 8x7 pont,
+     ASCII 32..90 = szokoz, szamok, jelek, NAGYBETUK). A kisbetu nagybetu lesz, a \ -> /, a _ -> -.
+   - Billentyuk: GE::GetKeyboard + GE::Pressed (a nyilak a matrix 8. soraban: JOY1_UP/DOWN/LEFT/RIGHT).
+     Nyomva tartva ismetel (elso ismetles 20 kep utan, aztan 3 kepenkent).
+   - Mozgaskor csak a regi es az uj sor jele rajzolodik ujra; a teljes lista csak lapozaskor / konyvtarvaltaskor.
+   - Konyvtar: a lemez-ROM FISH hivasa (MOPS rst $30 / $DB; 04H = elso, 05H = kovetkezo bejegyzes) - ez az
+     egy hivas asm (FishHivas), minden mas Pascal. ROM-hivas elott GE::EnableTVCITHandler, utana Disable.
+   Fel/Le = valasztas, Balra/Jobbra = lapozas, Enter = konyvtarba be / .STC (most csak kiirja), ESC = feljebb. */
+
+var
+	CharSet		:	incbin("resources/CharSetGR4.bin");	/* 118 byte szeles, 7 sor, 59 karakter */
+
+	const LATHATO	: byte = 22;		/* ennyi listasor latszik */
+	const LISTA_Y	: byte = 26;		/* az elso listasor kepsora */
+	const ALLAPOT_Y	: byte = 208;		/* uzenetsor */
+
+	Lista		:	array[4096] of byte;	/* 256 bejegyzes x 16: nev 8, kit. 3, attr 1, meret 4 */
+	MintaFcb		:	array[64] of byte;		/* keresesi minta (????????.???) */
+	TalaltFcb		:	array[64] of byte;		/* a talalt bejegyzes */
+	Fpb			:	array[8] of byte;		/* FISH parameterblokk: IX, HL, DE, BC */
+	Ut			:	array[64] of byte;		/* aktualis konyvtar, 0-val zarva; gyoker = \ */
+	Sor			:	array[34] of byte;		/* egy kepernyosor szovege */
+	Nev			:	array[14] of byte;		/* a bejegyzes neve (nev.kit), nyersen */
+
+	UtHossz, NevHossz, Db, Sel, Top, Regi, HibaKod	:	byte;
+	FishKod, FishHiba	:	byte;
+	Gomb, ElozoGomb, Ismetles	:	byte;
+	i, j, k, b, Elso	:	byte;
+	p			:	^byte;
+	a, Meret	:	integer;
+
+
+/* ---------------------------------------------------------------- az egyetlen asm: FISH-hivas
+   C = FishKod (04H elso / 05H kovetkezo keresese), DE -> FPB {IX = 0, HL = ut, DE = MintaFcb, BC = TalaltFcb};
+   eredmeny: FishHiba (0 = van bejegyzes). A hivas a $70-es lapozassal megy (mint a SIDSoftEMU-ban). */
+procedure FishHivas();
+begin
+	asm("
+		push	ix
+		push	iy
+		ld	hl,0
+		ld	(Fpb),hl
+		ld	hl,Ut
+		ld	(Fpb+2),hl
+		ld	hl,MintaFcb
+		ld	(Fpb+4),hl
+		ld	hl,TalaltFcb
+		ld	(Fpb+6),hl
+		ld	a,($0003)
+		push	af
+		ld	a,$70
+		ld	($0003),a
+		out	($02),a
+		ld	a,(FishKod)
+		ld	c,a
+		ld	de,Fpb
+		rst	$30
+		db	$DB
+		ld	(FishHiba),a
+		pop	af
+		ld	($0003),a
+		out	($02),a
+		pop	iy
+		pop	ix
+	");
+end;
+
+
+/* ---------------------------------------------------------------- p := a Sel-edik ... k-adik bejegyzes cime */
+procedure BejCim(n : byte);
+begin
+	a := n;
+	a := a * 16;
+	p := #Lista;
+	p := p + a;
+end;
+
+
+/* a p bejegyzes neve -> Nev (szokozok nelkul, nev.kit), NevHossz */
+procedure NevMasol();
+begin
+	NevHossz := 0;
+	j := 0;
+	while (j < 8) do
+	begin
+		b := p[j];
+		if (b <> 32) then
+		begin
+			Nev[NevHossz] := b;
+			NevHossz := NevHossz + 1;
+		end;
+		j := j + 1;
+	end;
+	if (p[8] <> 32) then
+	begin
+		Nev[NevHossz] := 46;		/* . */
+		NevHossz := NevHossz + 1;
+		while (j < 11) do
+		begin
+			b := p[j];
+			if (b <> 32) then
+			begin
+				Nev[NevHossz] := b;
+				NevHossz := NevHossz + 1;
+			end;
+			j := j + 1;
+		end;
+	end;
+	Nev[NevHossz] := 0;
+end;
+
+
+/* b -> a betukeszletben levo karakter */
+procedure Atkod();
+begin
+	if (b >= 97) then
+		if (b <= 122) then b := b - 32;
+	if (b = 92) then b := 47;		/* \ -> / */
+	if (b = 95) then b := 45;		/* _ -> - */
+	if (b > 90) then b := 63;		/* ? */
+end;
+
+
+/* Sor := 31 szokoz */
+procedure SorUres();
+begin
+	k := 0;
+	while (k < 31) do
+	begin
+		Sor[k] := 32;
+		k := k + 1;
+	end;
+	Sor[31] := 0;
+end;
+
+
+/* Meret -> Sor[k..k+4], jobbra igazitva */
+procedure Jegy(oszto : integer);
+begin
+	b := 48;
+	while (Meret >= oszto) do
+	begin
+		Meret := Meret - oszto;
+		b := b + 1;
+	end;
+	if (b = 48) then
+	begin
+		if (Elso = 1) then b := 32;
+	end
+	else
+		Elso := 0;
+	Sor[k] := b;
+	k := k + 1;
+end;
+
+procedure SzamIr();
+begin
+	Elso := 1;
+	Jegy(10000);
+	Jegy(1000);
+	Jegy(100);
+	Jegy(10);
+	Elso := 0;
+	Jegy(1);
+end;
+
+
+/* ---------------------------------------------------------------- kepernyo */
+/* n-edik bejegyzes sora -> Sor */
+procedure SorEpit(n : byte);
+begin
+	SorUres();
+	if (n = Sel) then Sor[0] := 62;		/* > */
+	BejCim(n);
+	NevMasol();
+	k := 0;
+	while (k < NevHossz) do
+	begin
+		b := Nev[k];
+		Atkod();
+		Sor[k + 1] := b;
+		k := k + 1;
+	end;
+	if ((p[11] & 16) <> 0) then
+	begin
+		/* konyvtar */
+		k := 0;
+		while (k < 10) do
+		begin
+			Sor[k + 16] := 32;
+			k := k + 1;
+		end;
+		Sor[16] := 60;		/* <KONYVTAR> */
+		Sor[17] := 75;
+		Sor[18] := 79;
+		Sor[19] := 78;
+		Sor[20] := 89;
+		Sor[21] := 86;
+		Sor[22] := 84;
+		Sor[23] := 65;
+		Sor[24] := 82;
+		Sor[25] := 62;
+	end
+	else
+	begin
+		/* meret KB-ban, felfele kerekitve: (b1 >> 2) + b2 * 64 */
+		Meret := p[14];
+		Meret := Meret * 64;
+		b := p[13];
+		b := b >> 2;
+		Meret := Meret + b;
+		b := p[13] & 3;
+		if (p[12] <> 0) then b := 1;
+		if (b <> 0) then Meret := Meret + 1;
+		k := 17;
+		SzamIr();
+		Sor[23] := 75;		/* KB */
+		Sor[24] := 66;
+	end;
+end;
+
+
+procedure ListaRajz();
+begin
+	i := 0;
+	while (i < LATHATO) do
+	begin
+		a := Top;
+		a := a + i;
+		if (a < Db) then
+		begin
+			SorEpit(Top + i);
+			GE::WriteText(0, LISTA_Y + i * 8, #Sor);
+		end
+		else
+			GE::FillRect(0, LISTA_Y + i * 8, 64, 8, 0);
+		i := i + 1;
+	end;
+	if (Db = 0) then
+	begin
+		SorUres();
+		Sor[0] := 40;	/* (URES) HIBA: n */
+		Sor[1] := 85;
+		Sor[2] := 82;
+		Sor[3] := 69;
+		Sor[4] := 83;
+		Sor[5] := 41;
+		Sor[7] := 72;
+		Sor[8] := 73;
+		Sor[9] := 66;
+		Sor[10] := 65;
+		Sor[11] := 58;
+		Meret := HibaKod;
+		k := 11;
+		SzamIr();
+		GE::WriteText(2, LISTA_Y, #Sor);
+	end;
+end;
+
+
+procedure Allapot(szoveg : ^byte);
+begin
+	GE::FillRect(0, ALLAPOT_Y, 64, 8, 0);
+	GE::WriteText(0, ALLAPOT_Y, szoveg);
+end;
+
+
+procedure Rajz();
+begin
+	GE::ClearScreen(GE::GR4_COLOR0);
+	GE::WriteText(0, 0, "SIDSOFTEMU - FAJLKEZELO (TESZT)");
+	/* az ut */
+	SorUres();
+	k := 0;
+	while (k < UtHossz) do
+	begin
+		if (k < 31) then
+		begin
+			b := Ut[k];
+			Atkod();
+			Sor[k] := b;
+		end;
+		k := k + 1;
+	end;
+	GE::WriteText(0, 11, #Sor);
+	GE::WriteText(0, 222, "FEL/LE, BALRA/JOBBRA: LAPOZAS");
+	GE::WriteText(0, 231, "ENTER: NYIT, ESC: VISSZA");
+	ListaRajz();
+end;
+
+
+/* ---------------------------------------------------------------- konyvtar beolvasasa -> Lista, Db */
+procedure Olvas();
+begin
+	Db := 0;
+	MintaFcb[0] := $FF;
+	k := 1;
+	while (k < 8) do
+	begin
+		MintaFcb[k] := 0;
+		k := k + 1;
+	end;
+	while (k < 19) do
+	begin
+		MintaFcb[k] := $3F;		/* ? */
+		k := k + 1;
+	end;
+	GE::EnableTVCITHandler();
+	FishKod := 4;
+	FishHivas();
+	while (FishHiba = 0) do
+	begin
+		/* a . bejegyzes kimarad */
+		b := 1;
+		if (TalaltFcb[8] = 46) then
+			if (TalaltFcb[9] = 32) then b := 0;
+		if (b = 1) then
+		begin
+			BejCim(Db);
+			k := 0;
+			while (k < 12) do
+			begin
+				p[k] := TalaltFcb[k + 8];
+				k := k + 1;
+			end;
+			while (k < 16) do
+			begin
+				p[k] := TalaltFcb[k + 24];		/* meret: TalaltFcb[36..39] */
+				k := k + 1;
+			end;
+			Db := Db + 1;
+		end;
+		FishKod := 5;
+		if (Db = 255) then FishHiba := 1
+		else FishHivas();
+	end;
+	HibaKod := FishHiba;
+	GE::DisableTVCITHandler();
+	Sel := 0;
+	Top := 0;
+end;
+
+
+/* ---------------------------------------------------------------- mozgas */
+procedure UjSel(n : byte);
+begin
+	Regi := Sel;
+	Sel := n;
+	if (Sel < Top) then
+	begin
+		Top := Sel;
+		ListaRajz();
+	end
+	else
+	if (Sel - Top >= LATHATO) then
+	begin
+		Top := Sel - LATHATO + 1;
+		ListaRajz();
+	end
+	else
+	begin
+		/* csak a jelek */
+		GE::WriteText(0, LISTA_Y + (Regi - Top) * 8, " ");
+		GE::WriteText(0, LISTA_Y + (Sel - Top) * 8, ">");
+	end;
+end;
+
+
+procedure UjKonyvtar();
+begin
+	Olvas();
+	Rajz();
+end;
+
+
+procedure Szulo();
+begin
+	if (UtHossz > 1) then
+	begin
+		k := UtHossz;
+		k := k - 1;
+		while (Ut[k] <> 92) do k := k - 1;
+		if (k = 0) then k := 1;		/* a gyoker \ marad */
+		Ut[k] := 0;
+		UtHossz := k;
+		UjKonyvtar();
+	end;
+end;
+
+
+procedure Enter();
+begin
+	if (Db = 0) then return;
+	BejCim(Sel);
+	if (p[0] = 46) then
+	begin
+		if (p[1] = 46) then Szulo();		/* .. */
+		return;
+	end;
+	NevMasol();
+	if ((p[11] & 16) <> 0) then
+	begin
+		/* konyvtar: hozzafuzes az uthoz */
+		if (UtHossz + NevHossz > 60) then return;
+		if (UtHossz > 1) then
+		begin
+			Ut[UtHossz] := 92;
+			UtHossz := UtHossz + 1;
+		end;
+		k := 0;
+		while (k < NevHossz) do
+		begin
+			Ut[UtHossz] := Nev[k];
+			UtHossz := UtHossz + 1;
+			k := k + 1;
+		end;
+		Ut[UtHossz] := 0;
+		UjKonyvtar();
+		return;
+	end;
+	/* fajl */
+	b := 0;
+	if (p[8] = 83) then
+		if (p[9] = 84) then
+			if (p[10] = 67) then b := 1;
+	if (b = 0) then
+	begin
+		Allapot("CSAK .STC FAJL JATSZHATO");
+		return;
+	end;
+	SorUres();
+	Sor[0] := 83;	/* SZOLNA: */
+	Sor[1] := 90;
+	Sor[2] := 79;
+	Sor[3] := 76;
+	Sor[4] := 78;
+	Sor[5] := 65;
+	Sor[6] := 58;
+	k := 0;
+	while (k < NevHossz) do
+	begin
+		b := Nev[k];
+		Atkod();
+		Sor[k + 8] := b;
+		k := k + 1;
+	end;
+	Allapot(#Sor);
+end;
+
+
+procedure Vegrehajt();
+begin
+	if (Gomb = 1) then
+	begin
+		if (Sel > 0) then UjSel(Sel - 1);
+	end;
+	if (Gomb = 2) then
+	begin
+		if (Sel + 1 < Db) then UjSel(Sel + 1);
+	end;
+	if (Gomb = 3) then
+	begin
+		if (Sel >= LATHATO) then UjSel(Sel - LATHATO)
+		else
+		if (Sel > 0) then UjSel(0);
+	end;
+	if (Gomb = 4) then
+	begin
+		if (Db > 0) then
+		begin
+			a := Sel;
+			a := a + LATHATO;
+			if (a >= Db) then
+			begin
+				if (Sel <> Db - 1) then UjSel(Db - 1);
+			end
+			else
+				UjSel(Sel + LATHATO);
+		end;
+	end;
+	if (Gomb = 5) then Enter();
+	if (Gomb = 6) then Szulo();
+end;
+
+
+/* ---------------------------------------------------------------- foprogram */
+begin
+	GE::SetGraphics(GE::GRAPHICS4);
+	GE::Init(GE::DIRECT_TO_SCREEN);			/* a firmware IT-kezelot kikapcsolja */
+	GE::SetMemory(GE::MEM_VID_ON);			/* U0, U1, VID, SYS */
+	GE::SetPalette(0, GE::PALETTE_BLACK);
+	GE::SetPalette(1, GE::PALETTE_GREEN);
+	GE::SetPalette(2, GE::PALETTE_RED);
+	GE::SetPalette(3, GE::PALETTE_YELLOW);
+	GE::SetBorder(GE::BORDER_BLACK);
+	GE::InitCharSet(#CharSet, 118, 2, 7);
+
+	Ut[0] := 92;		/* \ */
+	Ut[1] := 0;
+	UtHossz := 1;
+	UjKonyvtar();
+
+	ElozoGomb := 0;
+	while (true) do
+	begin
+		GE::WaitForSync();
+		GE::GetKeyboard();
+		Gomb := 0;
+		if (GE::Pressed(GE::JOY1_UP)) then Gomb := 1;
+		if (GE::Pressed(GE::JOY1_DOWN)) then Gomb := 2;
+		if (GE::Pressed(GE::JOY1_LEFT)) then Gomb := 3;
+		if (GE::Pressed(GE::JOY1_RIGHT)) then Gomb := 4;
+		if (GE::Pressed(GE::KEY_RET)) then Gomb := 5;
+		if (GE::Pressed(GE::KEY_ESC)) then Gomb := 6;
+		if (Gomb = 0) then
+			ElozoGomb := 0
+		else
+		if (Gomb <> ElozoGomb) then
+		begin
+			ElozoGomb := Gomb;
+			Ismetles := 20;
+			Vegrehajt();
+		end
+		else
+		if (Gomb < 5) then
+		begin
+			/* nyomva tartott nyil: ismetles */
+			Ismetles := Ismetles - 1;
+			if (Ismetles = 0) then
+			begin
+				Ismetles := 3;
+				Vegrehajt();
+			end;
+		end;
+	end;
+end.

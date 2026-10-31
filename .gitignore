@@ -13,3 +13,7 @@ __pycache__/
 tools/sid2tvc/sid2tvc
 tools/sid2tvc/sid2tvc.exe
 SIDSOFT2.dsk
+FajlTeszt.asm
+FajlTeszt.bin
+FajlTeszt.sym
+FajlTeszt.dsk

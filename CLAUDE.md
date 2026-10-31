@@ -74,6 +74,12 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   CRTC R6 = 10 (csak a felső 4 szöveges sor látszik), utána vissza. Lista: $6000, FCB-k $7000/$7040, FPB $7080.
   Kipróbálva: könyvtárváltás, LN1/5 (47 KB) bájtra egyezik, LN3/1, LN2/4 szól, vissza a listába, ESC, nem .STC üzenet.
   Valódi gépen (SD) a FISH-hívás még NINCS kipróbálva - ha ott nem megy, a lista üres/hibakód.
+- **FajlTeszt (2026-10-31, ep128emu-ben kipróbálva) - a fájlkezelő új változata KÜLÖN próbaprogramban** (a felhasználó
+  kérése: "kegyetlen lassú", TRSE-ben, GE/TVC unittal, ne asm-ben). `FajlTeszt.ras` (Pascal + GE: WriteText, FillRect,
+  GetKeyboard/Pressed, a nyilak = `JOY1_*`), egyetlen asm: `FishHivas` (FISH 04H/05H). Betűk: a WaterPumpGame régi
+  `resources/CharSetGR4.bin` (8x7, csak ASCII 32..90: nagybetű; `\`->`/`, `_`->`-`). Build: `bash resources/build_fajlteszt_mac.sh`,
+  lemez `FajlTeszt.dsk`, `load"FAJLTESZ"`. Mérve: könyvtárváltás ~0,1 s (a ROM-os kiírással ~1 s volt), nyomva tartott
+  nyíl ~16 sor/s, csak a jel rajzolódik át. Enter .STC-n most csak kiírja (SZOLNA: név). A SIDSoftEMU-ba még NINCS átvéve.
 - Folytatási ötletek: hangminőség (szűrő közelítése táblával, finomabb szintek/keverés, zaj), 5. aldal
   tömörítése, más .sid-ek kipróbálása, dal neve a fájlból a menüben.
 
