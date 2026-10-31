@@ -468,16 +468,9 @@ end;
 
 /* ---------------------------------------------------------------- kepernyo */
 /* a lista n-edik bejegyzese az y kepsorba */
-procedure SorRajz(n : byte);
+/* a sor szovegei (nev, meret / konyvtar) az Ir16_Hatter szinu teglalapokra; a hatteret nem torli */
+procedure SorSzoveg(n : byte);
 begin
-	/* kijelolt sor: sotetkek sav. A font szinei (13, 5) mind tartalmazzak a kek bitet, igy az OR nem valtoztat rajtuk. */
-	if (n = Sel) then
-	begin
-		GE::FillRect(0, y - 1, 64, 12, GE::GR16_COLOR_DARKBLUE);
-		Ir16_Hatter := GE::GR16_COLOR_DARKBLUE;
-	end
-	else
-		GE::FillRect(0, y - 1, 64, 12, 0);
 	BejCim(n);
 	NevMasol();
 	Ir16(NEV_X, y, #Nev);
@@ -499,6 +492,20 @@ begin
 		Ir16(MERET_JOBB - Ir16_Hossz, y, #SzamSz);
 		Ir16(MERET_JOBB + 1, y, "KB");
 	end;
+end;
+
+
+procedure SorRajz(n : byte);
+begin
+	/* kijelolt sor: sotetkek sav. A font szinei (13, 5) mind tartalmazzak a kek bitet, igy az OR nem valtoztat rajtuk. */
+	if (n = Sel) then
+	begin
+		GE::FillRect(0, y - 1, 64, 12, GE::GR16_COLOR_DARKBLUE);
+		Ir16_Hatter := GE::GR16_COLOR_DARKBLUE;
+	end
+	else
+		GE::FillRect(0, y - 1, 64, 12, 0);
+	SorSzoveg(n);
 	Ir16_Hatter := 0;
 end;
 
@@ -626,6 +633,10 @@ begin
 			GE::WaitForSync();
 		end;
 	end;
+	/* a regi sor szovege ujra, feketen: a kek bit nelkuli betupontok (8, 10) igy visszakapjak a szinuket */
+	y := LISTA_Y + (Regi - Top) * 12;
+	Ir16_Hatter := 0;
+	SorSzoveg(Regi);
 end;
 
 

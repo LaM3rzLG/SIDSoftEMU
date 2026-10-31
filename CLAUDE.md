@@ -92,6 +92,8 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   tartalmazzák a kék bitet, így nem változnak). Más sávszínhez maszkos rajzolás kellene.
   Szomszédos sorra a sáv CSÚSZIK (`Csusztat` + asm `SavSor`): pontsoronként egy sor kék le (csak a tiszta kék pont lesz
   fekete), egy sor kék fel (OR $03); képkockánként 3 sor = 4 képkocka. Lapozás/görgetés: azonnal.
+  A csúszás végén a régi sor szövege újra (`SorSzoveg`, fekete háttér): a kék bit nélküli betűpontok (8, 10) így nem maradnak
+  elszíneződve (maszk nélkül, a felhasználó elfogadta a megoldás irányát).
 - Folytatási ötletek: hangminőség (szűrő közelítése táblával, finomabb szintek/keverés, zaj), 5. aldal
   tömörítése, más .sid-ek kipróbálása, dal neve a fájlból a menüben.
 
