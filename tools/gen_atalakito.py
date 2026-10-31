@@ -8,7 +8,40 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MEZOK = ['FLO', 'FHI', 'PWLO', 'PWHI', 'CTRL', 'RA', 'RD', 'RS', 'RR', 'LVLLO', 'LVLHI', 'STATE', 'GATE',
          'WPLO', 'WPHI', 'WEND', 'STLO', 'STHI', 'SST0', 'SST1', 'SSL', 'SPW', 'ELSO', 'QH', 'QN', 'QPG', 'HPG',
          'TST0', 'TST1', 'TSL', 'TPW', 'WACT', 'WA0', 'WA1', 'WP0', 'WP1', 'WS0', 'WS1', 'WSL', 'WPW', 'WU', 'WFR',
-         'BU', 'BFR', 'BS0', 'BS1', 'BSL', 'BPW']
+         'BU', 'BFR', 'BS0', 'BS1', 'BSL', 'BPW', 'FCLO', 'FCHI', 'SLO', 'SHI']
+
+
+def irasok(d):
+    """SID-regiszterenkenti kezelo (C = ertek), fix cimekkel; a vegen jp AkTov. + ugrotabla AtIrT."""
+    o = {m: i for i, m in enumerate(MEZOK)}
+    L, T = [], []
+    for r in range(25):
+        lab = 'AtIr%02d' % r
+        T.append(lab)
+        L.append('\t%s:' % lab)
+        if r < 21:
+            v, k = divmod(r, 7)
+            B = lambda m: 'AtHangok+%d' % (v * len(MEZOK) + o[m])
+            if k in (0, 1, 2):
+                L += ['\t\tld\ta,c', '\t\tld\t(%s),a' % B(['FLO', 'FHI', 'PWLO'][k])]
+            elif k == 3:
+                L += ['\t\tld\ta,c', '\t\tand\t15', '\t\tld\t(%s),a' % B('PWHI')]
+            elif k == 4:
+                L += ['\t\tld\ta,(%s)' % B('GATE'), '\t\tld\te,a', '\t\tld\ta,c', '\t\tld\t(%s),a' % B('CTRL'),
+                      '\t\tand\t1', '\t\tld\t(%s),a' % B('GATE'), '\t\tcp\te', '\t\tjp\tz,AkTov',
+                      '\t\tor\ta', '\t\tld\ta,2', '\t\tjp\tz,%sR' % lab, '\t\txor\ta',
+                      '\t%sR:' % lab, '\t\tld\t(%s),a' % B('STATE')]
+            else:
+                hi, lo = ('RA', 'RD') if k == 5 else ('RS', 'RR')
+                L += ['\t\tld\ta,c', '\t\trrca', '\t\trrca', '\t\trrca', '\t\trrca', '\t\tand\t15',
+                      '\t\tld\t(%s),a' % B(hi), '\t\tld\ta,c', '\t\tand\t15', '\t\tld\t(%s),a' % B(lo)]
+        elif r == 24:
+            L += ['\t\tld\ta,c', '\t\tand\t15', '\t\tld\t(AtVol),a']
+        L.append('\t\tjp\tAkTov')
+    L.append('\tAtIrT:')
+    for i in range(0, 25, 8):
+        L.append('\t\tdw\t' + ', '.join(T[i:i + 8]))
+    return '\n'.join(L)
 
 
 def main():
@@ -19,6 +52,7 @@ def main():
     d['QMAX'] = str(T.QMAX)
     d['ATT'] = '\n'.join('\t\tdw\t' + ', '.join(str(v) for v in T.ATT[i:i + 8]) for i in range(0, 16, 8))
     d['SZINT'] = '\n'.join('\t\tdb\t' + ','.join(str(v) for v in T.SZINT[i:i + 24]) for i in range(0, 240, 24))
+    d['IRASOK'] = irasok(d)
     src = src.format(**d)
     out = []
     for line in src.split('\n'):

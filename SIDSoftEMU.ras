@@ -281,19 +281,19 @@ ATA_MAX	EQU	30000
 		ld	ix,AtHangok
 		ld	b,3
 	AtaPr1:
-		ld	a,(ix+27)			;	TST0, TST1, TSL, TPW (gen_atalakito MEZOK)
+		ld	a,(ix+AT_TST)			;	TST0, TST1, TSL, TPW (gen_atalakito MEZOK)
 		ld	(hl),a
 		inc	hl
-		ld	a,(ix+28)
+		ld	a,(ix+AT_TST1)
 		ld	(hl),a
 		inc	hl
-		ld	a,(ix+29)
+		ld	a,(ix+AT_TST2)
 		ld	(hl),a
 		inc	hl
-		ld	a,(ix+30)
+		ld	a,(ix+AT_TST3)
 		ld	(hl),a
 		inc	hl
-		ld	de,48
+		ld	de,AT_VMERET
 		add	ix,de
 		djnz	AtaPr1
 		ld	a,$B0
@@ -332,18 +332,18 @@ ATA_MAX	EQU	30000
 		ld	b,3
 	AtaVi1:
 		ld	a,(hl)
-		ld	(ix+27),a
+		ld	(ix+AT_TST),a
 		inc	hl
 		ld	a,(hl)
-		ld	(ix+28),a
+		ld	(ix+AT_TST1),a
 		inc	hl
 		ld	a,(hl)
-		ld	(ix+29),a
+		ld	(ix+AT_TST2),a
 		inc	hl
 		ld	a,(hl)
-		ld	(ix+30),a
+		ld	(ix+AT_TST3),a
 		inc	hl
-		ld	de,48
+		ld	de,AT_VMERET
 		add	ix,de
 		djnz	AtaVi1
 		call	AtK2

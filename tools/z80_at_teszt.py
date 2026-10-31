@@ -49,7 +49,7 @@ def main():
             break
         cel = []
         for v in range(3):
-            o = hb + 48 * v
+            o = hb + len(MEZOK) * v
             cel += [mem[o + off['TST0']] | (mem[o + off['TST1']] << 8), mem[o + off['TSL']], mem[o + off['TPW']]]
         if tuple(cel) != celok[i]:
             print('ALLAPOT ELTER a %d. kepkockanal:\n  TVC %s\n  ref %s' % (i, cel, celok[i]))

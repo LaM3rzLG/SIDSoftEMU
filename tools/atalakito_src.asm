@@ -20,6 +20,8 @@
 		db	0
 	AtVol:
 		db	0
+	AtVolTab:
+		db	$FF					;	a hangero, amihez az AT_SZTAB keszult
 	AtFinal:
 		db	0
 	AtFull:
@@ -43,6 +45,14 @@
 	AtSzint:
 {SZINT}
 
+;	a szinttabla helye: a SidPuffer 3. negyede (az atalakitas alatt szabad)
+AT_SZTAB	EQU	SidPuffer+512
+;	a hivo (SIDSoftEMU.ras Atalakitas) ezeket hasznalja: a hang-struktura merete es a cel (TST0..TPW) helye
+AT_VMERET	EQU	{VMERET}
+AT_TST	EQU	{TST0}
+AT_TST1	EQU	{TST1}				;	az OrgAsm az (ix+NEV+1)-bol a +1-et eldobja: kulon nev kell
+AT_TST2	EQU	{TSL}
+AT_TST3	EQU	{TPW}
 ;	------------------------------------------------ AtInit
 	AtInit:
 		ld	hl,AtHangok
@@ -63,6 +73,8 @@
 		ld	(AtStop),a
 		ld	(AtTele),a
 		ld	(AtVol),a
+		dec	a
+		ld	(AtVolTab),a
 		ld	hl,0
 		ld	(AtKepek),hl
 		ld	(AtNRef),hl
@@ -161,36 +173,31 @@
 		ld	b,a
 		ld	hl,CpuLog
 	AkLog:
-		ld	a,(hl)
+		ld	a,(hl)				;	regiszter (< 25)
 		inc	hl
-		ld	c,(hl)
+		ld	c,(hl)				;	ertek
 		inc	hl
-		push	bc
 		push	hl
-		cp	21
-		jp	nc,AkNem
-		ld	ix,AtHangok
-		ld	de,{VMERET}
-	AkDiv:
-		cp	7
-		jp	c,AkDivK
-		sub	7
-		add	ix,de
-		jp	AkDiv
-	AkDivK:
-		call	AtIras
-		jp	AkTov
-	AkNem:
-		cp	24
-		jp	nz,AkTov
-		ld	a,c
-		and	15
-		ld	(AtVol),a
+		push	bc
+		add	a,a
+		ld	e,a
+		ld	d,0
+		ld	hl,AtIrT
+		add	hl,de
+		ld	e,(hl)
+		inc	hl
+		ld	d,(hl)
+		ex	de,hl
+		jp	(hl)				;	regiszterenkenti kezelo (fix cimek), vissza: AkTov
 	AkTov:
-		pop	hl
 		pop	bc
+		pop	hl
 		djnz	AkLog
 	AkHangok:
+		ld	a,(AtVol)
+		ld	hl,AtVolTab
+		cp	(hl)
+		call	nz,AtSzTabla
 		ld	ix,AtHangok
 		ld	b,3
 	AkH:
@@ -223,76 +230,8 @@
 		ld	(AtKepek),hl
 		ret
 
-;	------------------------------------------------ regiszter-iras: A = k (0..6), C = ertek
-	AtIras:
-		or	a
-		jp	nz,Ir1
-		ld	(ix+{FLO}),c
-		ret
-	Ir1:
-		dec	a
-		jp	nz,Ir2
-		ld	(ix+{FHI}),c
-		ret
-	Ir2:
-		dec	a
-		jp	nz,Ir3
-		ld	(ix+{PWLO}),c
-		ret
-	Ir3:
-		dec	a
-		jp	nz,Ir4
-		ld	a,c
-		and	15
-		ld	(ix+{PWHI}),a
-		ret
-	Ir4:
-		dec	a
-		jp	nz,Ir5
-		ld	a,c
-		and	1
-		ld	b,a
-		jp	z,Ir4Nul
-		ld	a,(ix+{GATE})
-		or	a
-		jp	nz,Ir4Kesz
-		ld	(ix+{STATE}),0
-		jp	Ir4Kesz
-	Ir4Nul:
-		ld	a,(ix+{GATE})
-		or	a
-		jp	z,Ir4Kesz
-		ld	(ix+{STATE}),2
-	Ir4Kesz:
-		ld	(ix+{GATE}),b
-		ld	(ix+{CTRL}),c
-		ret
-	Ir5:
-		dec	a
-		jp	nz,Ir6
-		ld	a,c
-		rrca
-		rrca
-		rrca
-		rrca
-		and	15
-		ld	(ix+{RA}),a
-		ld	a,c
-		and	15
-		ld	(ix+{RD}),a
-		ret
-	Ir6:
-		ld	a,c
-		rrca
-		rrca
-		rrca
-		rrca
-		and	15
-		ld	(ix+{RS}),a
-		ld	a,c
-		and	15
-		ld	(ix+{RR}),a
-		ret
+;	------------------------------------------------ regiszter-irasok: C = ertek (generalt: tools/gen_atalakito.py)
+{IRASOK}
 
 ;	------------------------------------------------ burkolo: fel kepkocka
 	AtFel:
@@ -358,6 +297,38 @@
 		ld	(ix+{LVLHI}),h
 		ret
 
+;	AtSzTabla: AT_SZTAB[i] = AtSzint[(i * AtVol) >> 4], i = 0..255 (hangero-valtozaskor)
+	AtSzTabla:
+		ld	(AtVolTab),a
+		ld	c,a
+		ld	b,0					;	256 kor
+		ld	hl,0				;	i * hangero
+		ld	ix,AT_SZTAB
+	SztK:
+		push	hl
+		srl	h
+		rr	l
+		srl	h
+		rr	l
+		srl	h
+		rr	l
+		srl	h
+		rr	l
+		ld	de,AtSzint
+		add	hl,de
+		ld	a,(hl)
+		ld	(ix+0),a
+		pop	hl
+		ld	a,l
+		add	a,c
+		ld	l,a
+		jp	nc,SztK2
+		inc	h
+	SztK2:
+		inc	ix
+		djnz	SztK
+		ret
+
 ;	DE = AtAtt[A]
 	AtAttDE:
 		push	hl
@@ -403,28 +374,11 @@
 
 ;	------------------------------------------------ TVC-allapot (cel) a hang regisztereibol
 	AtAllapot:
-		ld	a,(AtVol)
-		ld	b,a
 		ld	e,(ix+{LVLHI})
 		ld	d,0
-		ld	hl,0
-		or	a
-		jp	z,AlMul0
-	AlMul:
+		ld	hl,AT_SZTAB
 		add	hl,de
-		djnz	AlMul
-	AlMul0:
-		srl	h
-		rr	l
-		srl	h
-		rr	l
-		srl	h
-		rr	l
-		srl	h
-		rr	l
-		ld	de,AtSzint
-		add	hl,de
-		ld	c,(hl)				;	C = szint 0..5
+		ld	c,(hl)				;	C = szint 0..5 = AtSzint[(szint * hangero) >> 4] (AtSzTabla)
 		ld	a,(ix+{CTRL})
 		and	8
 		jp	nz,AlCsend
@@ -440,6 +394,18 @@
 	AlVan:
 		ld	l,(ix+{FLO})
 		ld	h,(ix+{FHI})
+		ld	a,l					;	ugyanaz az F, mint legutobb? -> a tarolt lepes
+		cp	(ix+{FCLO})
+		jp	nz,AlUjF
+		ld	a,h
+		cp	(ix+{FCHI})
+		jp	nz,AlUjF
+		ld	l,(ix+{SLO})
+		ld	h,(ix+{SHI})
+		jp	AlLepVan
+	AlUjF:
+		ld	(ix+{FCLO}),l
+		ld	(ix+{FCHI}),h
 		ld	d,h
 		ld	e,l
 		srl	d
@@ -464,6 +430,9 @@
 		srl	d
 		rr	e
 		add	hl,de				;	HL = F - F/4 + F/64 + F/512
+		ld	(ix+{SLO}),l
+		ld	(ix+{SHI}),h
+	AlLepVan:
 		ld	a,(ix+{CTRL})
 		bit	7,a
 		jp	z,AlNemZaj
