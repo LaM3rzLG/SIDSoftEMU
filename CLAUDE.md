@@ -41,5 +41,4 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
 - WAV-ok a Macen: `python3 tools/sid_modell.py` (0-4), `python3 tools/sid_tvc_adat.py` (6-9 = a 4 változat pontos modellje).
 - Folytatás (ha visszatérünk): lejátszó asm-be (12% -> 2-3%); táblák generálása induláskor (a program kisebb);
   PC-s .sid -> regiszterdump -> TVC dal formátum (siddump/cRSID); ADSR a SID valódi időzítéseivel.
-- **A GitHub-repó (LaM3rzLG/SIDSoftEMU) még NEM létezik** - minden commit csak helyben van; létrehozáshoz a
-  felhasználó engedélye kell (az auto mód letiltotta).
+- **GitHub-repó NEM kell (a felhasználó döntése, 2026-10-31)** - csak helyi git, ne hozd létre, ne kérdezd.
