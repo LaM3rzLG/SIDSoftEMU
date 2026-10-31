@@ -255,7 +255,10 @@ begin
 		ld	(hl),$3E
 		inc	hl
 		ld	(hl),$70
+		ld	a,1				;	hangero 0 (port 6 bit 2-5), GR4 modbit marad - kulonben sipol
+		out	($06),a
 		ld	a,(LjMentB12)
+		and	$CF				;	hang (bit 4) es hang-IT (bit 5) ki
 		ld	($0B12),a
 		out	($05),a
 		ld	a,10
