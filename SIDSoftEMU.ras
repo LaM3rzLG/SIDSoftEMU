@@ -25,6 +25,7 @@ var
 	SidPuffer	:	array[1024] of byte;	/* betolteskor: darabok, innen masoljuk a helyukre ($B0 lapozassal) */
 
 @include "cpu6502.ras"
+@include "atalakito.ras"
 
 /* ---------------------------------------------------------------- betoltes (ROM-mal, a menubol) */
 procedure Betolt();
@@ -863,6 +864,7 @@ end;
 begin
 	TVC::SetGraphicsMode(TVC::GRAPHICS4);	/* a hang-IT a port 6-ra GR4 modbitet (1) ir */
 	CpuKod();	/* csak hogy a fordito bent hagyja (azonnal visszater) */
+	AtKod();
 	Menu();
 	while (true) do
 	begin
