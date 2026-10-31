@@ -16,6 +16,12 @@ program FajlTeszt16;
 
 var
 	Font16_Data	:	incbin("resources/font16_kek_cian.bin");
+	Logo_Data	:	incbin("resources/images/C64_logo_forog.bin");	/* maszkolt GE sprite, 6 byte x 17 sor, 16 fazis */
+	Logo		:	GE::Sprite;
+	const LOGO_X		: byte = 57;	/* jobb felso sarok (byte) */
+	const LOGO_Y		: byte = 3;
+	const LOGO_FAZIS	: byte = 16;
+	const LOGO_KESL		: byte = 3;		/* kepkocka / fazis (a sprite-szerkeszto "speed" erteke) */
 
 	const LATHATO	: byte = 14;		/* ennyi listasor latszik */
 	const LISTA_Y	: byte = 27;		/* az elso listasor kepsora */
@@ -694,10 +700,21 @@ begin
 end;
 
 
+/* a forgo logo rajzolasa: hatter vissza (LastPosition) -> Draw (menti a hatteret, rajzol) -> UpdateLastPos (Ugh-minta) */
+procedure LogoRajz();
+begin
+	Logo.RestoreBackground();
+	Logo.SetPosition();
+	Logo.Draw();
+	Logo.UpdateLastPos();
+end;
+
+
 procedure UjKonyvtar();
 begin
 	Olvas();
 	Rajz();
+	LogoRajz();		/* a Rajz torolte a kepet; a hatterpuffer is fekete, igy a visszaallitas nem art */
 end;
 
 
@@ -808,12 +825,24 @@ begin
 	Ut[0] := 92;		/* \ */
 	Ut[1] := 0;
 	UtHossz := 1;
+	GE::ClearScreen(GE::GR16_COLOR_BLACK);
+	Logo.Init(#Logo_Data, LOGO_X, LOGO_Y, True);	/* True: hatterpuffer (fekete) */
+	Logo.InitAnimation(LOGO_FAZIS, LOGO_KESL, GE::LOOP_FORWARD);
+	Logo.SetPosition();
+	Logo.Draw();
+	Logo.UpdateLastPos();
 	UjKonyvtar();
 
 	ElozoGomb := 0;
 	while (true) do
 	begin
 		GE::WaitForSync();
+		Logo.Animation();
+		if (Logo.WasAnimated) then
+		begin
+			Logo.WasAnimated := False;	/* a GE nem torli magatol */
+			LogoRajz();
+		end;
 		GE::GetKeyboard();
 		Gomb := 0;
 		if (GE::Pressed(GE::JOY1_UP)) then Gomb := 1;

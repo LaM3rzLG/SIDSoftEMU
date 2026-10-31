@@ -93,6 +93,9 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   pontjai sosem változnak (az OR-os változat elszínezte a 8/10-es pontokat - a felhasználó "csúnya"-nak ítélte). Lapozás: azonnal.
   Font most: `resources/font16_kek_cian.bin` (cián + sötétkék árnyék; forrás TVC_Kozos/tools/Fontok). A sáv színe `SAV_SZIN`
   (most sötétlila), olyan szín kell, ami NINCS a fontban (ez a font: 0,1,5,8,9,10,13).
+  Forgó C64-logó a jobb felső sarokban (x 57, y 3): `resources/images/C64_logo_forog.bin` (maszkolt GE sprite 6x17, 16 fázis,
+  a felhasználó rajza; .json = sprite-szerkesztő projekt, .bmp-k = fázisok), GE::Sprite + InitAnimation(16, 3, LOOP_FORWARD);
+  fázisváltáskor RestoreBackground -> SetPosition -> Draw -> UpdateLastPos (Ugh-minta); könyvtárváltás után újrarajzolva.
 - Folytatási ötletek: hangminőség (szűrő közelítése táblával, finomabb szintek/keverés, zaj), 5. aldal
   tömörítése, más .sid-ek kipróbálása, dal neve a fájlból a menüben.
 
