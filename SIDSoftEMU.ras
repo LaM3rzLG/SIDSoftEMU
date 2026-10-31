@@ -5,17 +5,17 @@ program SIDSoftEMU;
    lemezrol, 3 hang 5008 Hz-en ("A" valtozat: hangonkent 0..5 szint, osszeg a port 6-ra).
    - Menu (a ROM el): 1..9, 0 = 10, A = 11 -> SID_TVC\LNINJA\nn.STC betoltese, lejatszas. Lejatszas kozben barmely gomb = vissza.
    - Betoltes a ROM-mal (Lemmings-sorrend: $0B0A:=0, $D3 nyitas, $D2 olvasas, $D4 zaras). A fajl: 2 byte hossz,
-     aztan a dal $C000 feletti resze (ez $8000-ra jon = U2, onnan U3-ba masoljuk), vegul a $4000-$BFFF resz.
-   - Lejatszas: teljes 64K RAM ($B0: U0,U1,U2,U3; a kepet a CRTC a VID-bol mutatja tovabb), tablak $EF00-$FFFF,
-     dal $4000-tol. Sajat IT a $38-on (IM 1); kilepeskor a rendszer-IT visszaall (F5 3E 70, mint GE::EnableTVCITHandler).
+     aztan a dal $C000 feletti resze (ez $8000-ra jon = U2, onnan U3-ba masoljuk), vegul a $5000-$BFFF resz.
+   - Lejatszas: teljes 64K RAM ($B0: U0,U1,U2,U3; a kepet a CRTC a VID-bol mutatja tovabb), tablak $EF00-$FFFF
+     (TablaGen), dal $5000-tol (max 40,7 KB). Sajat IT a $38-on (IM 1); kilepeskor a rendszer-IT visszaall (F5 3E 70, mint GE::EnableTVCITHandler).
    - Hang-IT: 3 fazisszamlalo IX, IY, HL'. Hangonkent 5 byte-os onmodosito res (V1SH..V3SH): tabla
      (ld e,a / ld d,lap / ld a,(de) / nop) vagy negyszog (cp PW / sbc a,a / and AMP). A dekodolo asm-ben.
    - Meres a keretben: IT = PIROS, lejatszo = ZOLD, szabad = FEKETE.
    TILOS a fo programban lejatszas kozben: IX, IY, shadow regiszterek, ROM-hivas.
-   A program vege < $4000 kell legyen (.sym: EndBlock). */
+   A program vege < $5000 kell legyen (.sym: EndBlock). */
 
 var
-	SidTablak	:	incbin("resources/sid_tablak.bin");		/* 17 lap -> $EF00 */
+	SidZaj		:	incbin("resources/sid_zaj.bin");		/* zaj-alak: 256 x 0..15 (a TablaGen-hez) */
 	Fajlnev		:	array[22] of byte = (21, $53, $49, $44, $5F, $54, $56, $43, $5C, $4C, $4E, $49, $4E, $4A, $41, $5C, $30, $33, $2E, $53, $54, $43);	/* "SID_TVC\LNINJA\03.STC" - az aldal a 16-17. byte */
 	IrasNev		:	array[24] of byte = (23, $53, $49, $44, $5F, $54, $56, $43, $5C, $4C, $4E, $49, $4E, $4A, $41, $5C, $49, $52, $41, $53, $2E, $53, $54, $43);	/* proba: "SID_TVC\\LNINJA\\IRAS.STC" */
 	Kod, Dal, Hiba	:	byte;
@@ -46,7 +46,7 @@ begin
 		rst	$30
 		db	$D2					;	CAS_BKIN
 		ld	hl,(BtHossz)
-		ld	de,$8000
+		ld	de,$C000-$5000		;	a $5000-$BFFF resz hossza
 		or	a
 		sbc	hl,de
 		jr	c,BtKicsi
@@ -68,12 +68,12 @@ begin
 		ld	a,($0003)
 		out	($02),a
 		ei
-		ld	bc,$8000
+		ld	bc,$C000-$5000
 		jr	BtFo
 	BtKicsi:
 		ld	bc,(BtHossz)
 	BtFo:
-		ld	de,$4000
+		ld	de,$5000
 		rst	$30
 		db	$D2
 		xor	a
@@ -86,7 +86,7 @@ begin
 end;
 
 /* ---------------------------------------------------------------- PROBA: fajliras (W gomb a menuben)
-   2 blokkiras: 2 byte (BtHossz) + 32768 byte a $4000-rol. Eredmeny az IrEredm-ben. */
+   2 blokkiras: 2 byte (BtHossz) + 28672 byte a $5000-rol. Eredmeny az IrEredm-ben. */
 procedure IrasProba();
 begin
 	asm("
@@ -103,8 +103,8 @@ begin
 		rst	$30
 		db	$52					;	CAS_BKOUT
 		ld	(IrEredm+2),bc
-		ld	de,$4000
-		ld	bc,$8000
+		ld	de,$5000
+		ld	bc,$7000
 		rst	$30
 		db	$52
 		ld	(IrEredm+4),bc
@@ -122,7 +122,7 @@ end;
 procedure SidBetolt();
 begin
 	asm("
-SID_IMG	EQU	$58
+SID_IMG	EQU	$50
 		xor	a
 		ld	(Hiba),a
 		ld	($0B0A),a
@@ -328,6 +328,10 @@ begin
 	");
 end;
 
+/* ---------------------------------------------------------------- hangtablak generalasa (a TablaGen a Lejatszas asm-jeben): $EF00-$FFFF ($B0 lapozasban)
+   0. lap = csend; 1-15 = (fures, haromszog, zaj) x szint 1..5, ertek = TgSzint[szint][alak 0..15];
+   16. lap ($FF00) = keveres: (i & $FC) | 1 (GR4 modbit). Ugyanaz, mint a tools/sid2tvc.py build_tables(). */
+
 /* ---------------------------------------------------------------- lejatszas (SPACE-ig) */
 procedure Lejatszas();
 begin
@@ -346,10 +350,7 @@ begin
 		ld	a,$B0				;	U0,U1,U2,U3
 		ld	($0003),a
 		out	($02),a
-		ld	hl,SidTablak
-		ld	de,$EF00
-		ld	bc,$1100			;	17 lap
-		ldir
+		call	TablaGen			;	17 lap: $EF00-$FFFF
 		;	dekodolo-allapot: hangonkent 10 byte (mutato, var, refdb, visszater, lepes, szelet, PW)
 		ld	hl,DkAll
 		ld	b,30
@@ -357,11 +358,11 @@ begin
 		ld	(hl),0
 		inc	hl
 		djnz	LjTorl
-		ld	hl,($4000)
+		ld	hl,($5000)
 		ld	(DkAll),hl
-		ld	hl,($4002)
+		ld	hl,($5002)
 		ld	(DkAll+10),hl
-		ld	hl,($4004)
+		ld	hl,($5004)
 		ld	(DkAll+20),hl
 		ld	a,128
 		ld	(DkAll+9),a
@@ -675,6 +676,99 @@ begin
 	DkTarol:
 		ld	(DkM),hl
 		ret
+
+	TablaGen:
+		ld	hl,$EF00
+		xor	a
+	TgCsend:
+		ld	(hl),a
+		inc	l
+		jr	nz,TgCsend
+		inc	h					;	$F000
+		ld	c,0					;	alak 0..2
+	TgAlak:
+		ld	de,TgSzint			;	szint 1..5: 16 byte-onkent
+		ld	b,5
+	TgSzintK:
+		push	bc
+	TgByte:
+		;	w = alak(l)
+		ld	a,c
+		or	a
+		jr	nz,TgNemFur
+		ld	a,l					;	fures: i >> 4
+		rrca
+		rrca
+		rrca
+		rrca
+		and	15
+		jr	TgW
+	TgNemFur:
+		dec	a
+		jr	nz,TgZaj
+		ld	a,l					;	haromszog: t = i >> 3; t < 16 ? t : 31 - t
+		rrca
+		rrca
+		rrca
+		and	31
+		cp	16
+		jr	c,TgW
+		cpl
+		add	a,32
+		jr	TgW
+	TgZaj:
+		push	hl
+		ld	a,l
+		ld	hl,SidZaj
+		add	a,l
+		ld	l,a
+		jr	nc,TgZ1
+		inc	h
+	TgZ1:
+		ld	a,(hl)
+		pop	hl
+	TgW:
+		push	de
+		ex	de,hl				;	HL = szinttabla, DE = lap
+		add	a,l
+		ld	l,a
+		jr	nc,TgW1
+		inc	h
+	TgW1:
+		ld	a,(hl)
+		ex	de,hl
+		pop	de
+		ld	(hl),a
+		inc	l
+		jr	nz,TgByte
+		inc	h					;	kovetkezo lap
+		ld	a,e
+		add	a,16
+		ld	e,a
+		jr	nc,TgW2
+		inc	d
+	TgW2:
+		pop	bc
+		djnz	TgSzintK
+		inc	c
+		ld	a,c
+		cp	3
+		jr	nz,TgAlak
+		;	keveres ($FF00)
+	TgKev:
+		ld	a,l
+		and	$FC
+		or	1
+		ld	(hl),a
+		inc	l
+		jr	nz,TgKev
+		ret
+	TgSzint:
+		db	0,0,0,0,0,0,0,0,4,4,4,4,4,4,4,4
+		db	0,0,0,0,4,4,4,4,4,4,4,4,8,8,8,8
+		db	0,0,0,4,4,4,4,4,8,8,8,8,8,12,12,12
+		db	0,0,4,4,4,4,8,8,8,8,12,12,12,12,16,16
+		db	0,0,4,4,4,8,8,8,12,12,12,16,16,16,20,20
 
 	SidResCsend:
 		ld	(hl),$5F
