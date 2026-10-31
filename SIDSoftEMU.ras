@@ -1,75 +1,132 @@
 program SIDSoftEMU;
 @use "TVC"
-@use "GE"
 
-/* SIDSoftEMU - teszt (2026-10-31): 3 hangos SID-szeru szintezis, 4 valtozat az 1..4 gombokon.
-   1: hangonkent 6 szint, nyers hullamok (5008 Hz)      2: hangonkent 8 szint + lagyan tomorito keveres
-   3: mint 2 + savkorlatozott ("szurt") fures            4: mint 3, de 3986 Hz (kevesebb gepido)
-   - Memoria: U0, U1, VID, U3 (GE::MEM_48K_VID) - ROM nincs bent; a hangtablak $C000-$FDFF (U3).
+/* SIDSoftEMU - SID-lejatszo (2026-10-31): a .sid-bol PC-n keszult dal (tools/sid2tvc.py -> dalok/DALnn.BIN)
+   lemezrol, 3 hang 5008 Hz-en ("A" valtozat: hangonkent 0..5 szint, osszeg a port 6-ra).
+   - Menu (a ROM el): 1..9, 0 = 10, A = 11 -> DALnn.BIN betoltese, lejatszas. Lejatszas kozben barmely gomb = vissza.
+   - Betoltes a ROM-mal (Lemmings-sorrend: $0B0A:=0, $D3 nyitas, $D2 olvasas, $D4 zaras). A fajl: 2 byte hossz,
+     aztan a dal $C000 feletti resze (ez $8000-ra jon = U2, onnan U3-ba masoljuk), vegul a $4000-$BFFF resz.
+   - Lejatszas: teljes 64K RAM ($B0: U0,U1,U2,U3; a kepet a CRTC a VID-bol mutatja tovabb), tablak $EF00-$FFFF,
+     dal $4000-tol. Sajat IT a $38-on (IM 1); kilepeskor a rendszer-IT visszaall (F5 3E 70, mint GE::EnableTVCITHandler).
    - Hang-IT: 3 fazisszamlalo IX, IY, HL'. Hangonkent 5 byte-os onmodosito res (V1SH..V3SH): tabla
-     (ld e,a / ld d,lap / ld a,(de) / nop) vagy negyszog (cp PW / sbc a,a / and AMP). Az osszeg egy keverotablan
-     (MIXLAP) at megy a port 6-ra (a tabla erteke mar tartalmazza a grafikus mod bitjeit).
-   - A fo program kepkockankent (100 ill. 80 IT) futtatja a lejatszot, majd di/ei kozott atirja a reseket.
+     (ld e,a / ld d,lap / ld a,(de) / nop) vagy negyszog (cp PW / sbc a,a / and AMP). A dekodolo asm-ben.
    - Meres a keretben: IT = PIROS, lejatszo = ZOLD, szabad = FEKETE.
-   TILOS a fo programban: IX, IY, shadow regiszterek -> GE rutinok sem, amig a hang szol.
-   Adat: tools/sid_tvc_adat.py -> resources/sid_tablak.bin ($C000), resources/sid_adat.bin ($7000).
-   A program vege < $7000 kell legyen (.sym: EndBlock). */
+   TILOS a fo programban lejatszas kozben: IX, IY, shadow regiszterek, ROM-hivas.
+   A program vege < $4000 kell legyen (.sym: EndBlock). */
 
 var
-	SidTablak	:	incbin("resources/sid_tablak.bin");
-	SidAdat		:	incbin("resources/sid_adat.bin");
+	SidTablak	:	incbin("resources/sid_tablak.bin");		/* 17 lap -> $EF00 */
+	Fajlnev		:	array[10] of byte = (9, $44, $41, $4C, $30, $33, $2E, $42, $49, $4E);	/* "DAL03.BIN" */
+	Kod, Dal, Hiba	:	byte;
 
-	/* a $7000-ra masolt adat reszei */
-	StepLo0	:	array[128] of byte at $7000;
-	StepHi0	:	array[128] of byte at $7080;
-	StepLo1	:	array[128] of byte at $7100;
-	StepHi1	:	array[128] of byte at $7180;
-	Sav0	:	array[128] of byte at $7200;
-	Sav1	:	array[128] of byte at $7280;
-	AmpA	:	array[16] of byte at $7300;
-	AmpB	:	array[16] of byte at $7310;
-	Hangszer:	array[40] of byte at $7320;
-	Dal		:	array[2048] of byte at $7360;
-
-	/* hangonkenti allapot */
-	Lvl		:	array[3] of byte;
-	Allapot	:	array[3] of byte;	/* 0 attack, 1 decay/sustain, 2 release */
-	Rovid	:	array[3] of byte;
-	Hullam	:	array[3] of byte;
-	Att		:	array[3] of byte;
-	Dek		:	array[3] of byte;
-	Sus		:	array[3] of byte;
-	Rel		:	array[3] of byte;
-	Hang	:	array[3] of byte;	/* a szolo MIDI hang (a lepes ujraszamolasahoz valtaskor) */
-	SLo		:	array[3] of byte;
-	SHi		:	array[3] of byte;
-	Res		:	array[15] of byte;	/* 3 x 5 byte a V1SH..V3SH-ba */
-
-	DalPos	:	integer;
-	FCnt, v, n, ii, amp, o, PW, PWIrany, lap	:	byte;
-	Valt, UjValt, Billentyu	:	byte;	/* valtozat 0..3 */
-	Ratei	:	byte;		/* 0 = 5008 Hz, 1 = 3986 Hz */
-	ItPort4, ItPerKep, MixLap	:	byte;
-
-/* ---------------------------------------------------------------- hang-IT + inditas */
-procedure SidStart();
+/* ---------------------------------------------------------------- betoltes (ROM-mal, a menubol) */
+procedure Betolt();
 begin
 	asm("
+		xor	a
+		ld	(Hiba),a
+		ld	($0B0A),a
+		ld	de,Fajlnev
+		rst	$30
+		db	$D3					;	CAS_OPEN, Z = ok
+		jr	z,BtNyitva
+		ld	a,1
+		ld	(Hiba),a
+		ret
+	BtNyitva:
+		ld	de,BtHossz
+		ld	bc,2
+		rst	$30
+		db	$D2					;	CAS_BKIN
+		ld	hl,(BtHossz)
+		ld	de,$8000
+		or	a
+		sbc	hl,de
+		jr	c,BtKicsi
+		jr	z,BtKicsi
+		;	a $C000 feletti resz: $8000-ra (U2), majd U3-ba
+		push	hl
+		ld	b,h
+		ld	c,l
+		ld	de,$8000
+		rst	$30
+		db	$D2
+		pop	bc
 		di
-		ld	hl,SidTablak
+		ld	a,$B0
+		out	($02),a
+		ld	hl,$8000
 		ld	de,$C000
-		ld	bc,$3E00			;	62 lap. FIGYELEM: az OrgAsm a cimke-kulonbseget 0-ra forditja (ldir 64 KB!)
 		ldir
-		ld	hl,SidAdat
-		ld	de,$7000
-		ld	bc,$0961			;	sid_adat.bin hossza (a tools/sid_tvc_adat.py kiirja)
+		ld	a,($0003)
+		out	($02),a
+		ei
+		ld	bc,$8000
+		jr	BtFo
+	BtKicsi:
+		ld	bc,(BtHossz)
+	BtFo:
+		ld	de,$4000
+		rst	$30
+		db	$D2
+		xor	a
+		rst	$30
+		db	$D4					;	zaras (olvasas)
+		ret
+	BtHossz:
+		dw	0
+	");
+end;
+
+/* ---------------------------------------------------------------- lejatszas (SPACE-ig) */
+procedure Lejatszas();
+begin
+	asm("
+		;	--- mentes, atvetel
+		di
+		ld	(LjMentIX),ix
+		ld	(LjMentIY),iy
+		exx
+		ld	(LjMentHL),hl
+		ld	(LjMentDE),de
+		ld	(LjMentBC),bc
+		exx
+		ld	a,($0B12)
+		ld	(LjMentB12),a
+		ld	a,$B0				;	U0,U1,U2,U3
+		ld	($0003),a
+		out	($02),a
+		ld	hl,SidTablak
+		ld	de,$EF00
+		ld	bc,$1100			;	17 lap
 		ldir
+		;	dekodolo-allapot: hangonkent 10 byte (mutato, var, refdb, visszater, lepes, szelet, PW)
+		ld	hl,DkAll
+		ld	b,30
+	LjTorl:
+		ld	(hl),0
+		inc	hl
+		djnz	LjTorl
+		ld	hl,($4000)
+		ld	(DkAll),hl
+		ld	hl,($4002)
+		ld	(DkAll+10),hl
+		ld	hl,($4004)
+		ld	(DkAll+20),hl
+		ld	a,128
+		ld	(DkAll+9),a
+		ld	(DkAll+19),a
+		ld	(DkAll+29),a
 		ld	hl,V1SH
 		call	SidResCsend
 		ld	hl,V2SH
 		call	SidResCsend
 		ld	hl,V3SH
 		call	SidResCsend
+		ld	hl,0
+		ld	(V1ST+1),hl
+		ld	(V2ST+1),hl
+		ld	(V3ST+1),hl
 		ld	ix,0
 		ld	iy,0
 		exx
@@ -84,7 +141,7 @@ begin
 		ld	(hl),e
 		inc	hl
 		ld	(hl),d
-		;	hang-IT: 5008 Hz (mint a music.tru)
+		;	hang-IT: 5008 Hz (port 4 = $D9, port 5 also 4 bit = 15, bit 5 = IT)
 		ld	a,($0B12)
 		and	128+64
 		or	15+32
@@ -103,8 +160,267 @@ begin
 		out	($70),a
 		ld	a,3+32
 		out	($71),a
-		im	1			;	IM 1: a $38-ra ugrik (a rendszer IM 2-es tablaja a ROM-ban van, az most nincs bent)
+		im	1
 		ei
+		;	--- elengedesre var (a menu gombja)
+	LjElenged:
+		call	BillAny
+		jr	nz,LjElenged
+
+		;	--- fo hurok: kepkockankent
+	LjKor:
+		xor	a
+		ld	(SidKeret),a
+		out	($00),a
+	LjVar:
+		ld	a,(SidFlag)
+		or	a
+		jr	z,LjVar
+		xor	a
+		ld	(SidFlag),a
+		ld	a,160			;	keret: zold = lejatszo
+		ld	(SidKeret),a
+		out	($00),a
+		;	3 hang dekodolasa: az allapotot a munkateruletre masoljuk, vissza
+		ld	hl,DkAll
+		ld	de,Res
+		call	DkHang
+		ld	hl,DkAll+10
+		ld	de,Res+5
+		call	DkHang
+		ld	hl,DkAll+20
+		ld	de,Res+10
+		call	DkHang
+		;	a resek + lepesek atirasa (di/ei)
+		di
+		ld	hl,Res
+		ld	de,V1SH
+		ld	bc,5
+		ldir
+		ld	de,V2SH
+		ld	bc,5
+		ldir
+		ld	de,V3SH
+		ld	bc,5
+		ldir
+		ld	hl,(DkAll+6)
+		ld	(V1ST+1),hl
+		ld	hl,(DkAll+16)
+		ld	(V2ST+1),hl
+		ld	hl,(DkAll+26)
+		ld	(V3ST+1),hl
+		ei
+		;	barmely gomb = vissza a menube
+		call	BillAny
+		jr	z,LjKor
+
+		;	--- visszaadas a rendszernek
+		di
+		ld	hl,$38
+		ld	(hl),$F5
+		inc	hl
+		ld	(hl),$3E
+		inc	hl
+		ld	(hl),$70
+		ld	a,(LjMentB12)
+		ld	($0B12),a
+		out	($05),a
+		ld	a,10
+		out	($70),a
+		ld	a,3
+		out	($71),a
+		ld	a,11
+		out	($70),a
+		ld	a,3
+		out	($71),a
+		ld	a,$70
+		ld	($0003),a
+		out	($02),a
+		xor	a
+		out	($00),a
+		ld	ix,(LjMentIX)
+		ld	iy,(LjMentIY)
+		exx
+		ld	hl,(LjMentHL)
+		ld	de,(LjMentDE)
+		ld	bc,(LjMentBC)
+		exx
+		ei
+		ret
+
+	LjMentIX:
+		dw	0
+	LjMentIY:
+		dw	0
+	LjMentHL:
+		dw	0
+	LjMentDE:
+		dw	0
+	LjMentBC:
+		dw	0
+	LjMentB12:
+		db	0
+
+	;	------------------------------------------------ billentyuzet: Z = nincs lenyomva (sorok 0..9, port 3 / $58)
+	BillAny:
+		ld	a,($0B11)
+		and	$F0
+		ld	b,10
+	BaSor:
+		out	($03),a
+		ld	c,a
+		in	a,($58)
+		inc	a
+		ret	nz				;	nem $FF -> van lenyomott gomb (NZ)
+		ld	a,c
+		inc	a
+		djnz	BaSor
+		xor	a				;	Z
+		ret
+
+	;	------------------------------------------------ egy hang dekodolasa
+	;	HL = a hang allapota (10 byte), DE = a hang res-kepe (5 byte)
+	DkHang:
+		push	hl
+		push	de
+		ld	de,DkM
+		ld	bc,10
+		ldir
+		call	DkLep
+		pop	de
+		;	res-kep: tabla vagy negyszog
+		ld	a,(DkM+8)
+		bit	7,a
+		jr	nz,DkNegy
+		add	a,$EF
+		ex	de,hl
+		ld	(hl),$5F
+		inc	hl
+		ld	(hl),$16
+		inc	hl
+		ld	(hl),a
+		inc	hl
+		ld	(hl),$1A
+		inc	hl
+		ld	(hl),0
+		jr	DkVissza
+	DkNegy:
+		and	7
+		add	a,a
+		add	a,a
+		ld	b,a
+		ex	de,hl
+		ld	(hl),$FE
+		inc	hl
+		ld	a,(DkM+9)
+		ld	(hl),a
+		inc	hl
+		ld	(hl),$9F
+		inc	hl
+		ld	(hl),$E6
+		inc	hl
+		ld	(hl),b
+	DkVissza:
+		pop	de
+		ld	hl,DkM
+		ld	bc,10
+		ldir
+		ret
+
+	;	munkaterulet: +0 mutato, +2 var, +3 refdb, +4 visszateres, +6 lepes, +8 szelet, +9 PW
+	DkM:
+		db	0,0,0,0,0,0,0,0,0,0
+	DkAll:
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	Res:
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+
+	DkLep:
+		ld	a,(DkM+2)
+		or	a
+		jr	z,DkOlvas
+		dec	a
+		ld	(DkM+2),a
+		ret
+	DkOlvas:
+		ld	hl,(DkM)
+	DkKod:
+		ld	a,(hl)
+		cp	$10
+		jr	nz,DkNem10
+		inc	hl				;	REF lo hi n
+		ld	e,(hl)
+		inc	hl
+		ld	d,(hl)
+		inc	hl
+		ld	a,(hl)
+		ld	(DkM+3),a
+		inc	hl
+		ld	(DkM+4),hl
+		ex	de,hl
+		jr	DkKod
+	DkNem10:
+		cp	$11
+		jr	nz,DkNem11
+		inc	hl				;	VEGE lo hi
+		ld	e,(hl)
+		inc	hl
+		ld	d,(hl)
+		ex	de,hl
+		jr	DkKod
+	DkNem11:
+		inc	hl
+		bit	7,a
+		jr	z,DkRek
+		and	$7F				;	varakozas n kepkocka
+		dec	a
+		ld	(DkM+2),a
+		jr	DkVeg
+	DkRek:
+		ld	c,a
+		bit	0,c
+		jr	z,DkR1
+		ld	e,(hl)
+		inc	hl
+		ld	d,(hl)
+		inc	hl
+		ld	(DkM+6),de
+	DkR1:
+		bit	1,c
+		jr	z,DkR2
+		ld	a,(hl)
+		inc	hl
+		ld	e,a
+		rla
+		sbc	a,a
+		ld	d,a
+		push	hl
+		ld	hl,(DkM+6)
+		add	hl,de
+		ld	(DkM+6),hl
+		pop	hl
+	DkR2:
+		bit	2,c
+		jr	z,DkR3
+		ld	a,(hl)
+		inc	hl
+		ld	(DkM+8),a
+	DkR3:
+		bit	3,c
+		jr	z,DkVeg
+		ld	a,(hl)
+		inc	hl
+		ld	(DkM+9),a
+	DkVeg:
+		ld	a,(DkM+3)
+		or	a
+		jr	z,DkTarol
+		dec	a
+		ld	(DkM+3),a
+		jr	nz,DkTarol
+		ld	hl,(DkM+4)
+	DkTarol:
+		ld	(DkM),hl
 		ret
 
 	SidResCsend:
@@ -112,7 +428,7 @@ begin
 		inc	hl
 		ld	(hl),$16
 		inc	hl
-		ld	(hl),$C0
+		ld	(hl),$EF
 		inc	hl
 		ld	(hl),$1A
 		inc	hl
@@ -137,7 +453,7 @@ begin
 		ld	a,ixh
 	V1SH:
 		ld	e,a
-		ld	d,$C0
+		ld	d,$EF
 		ld	a,(de)
 		nop
 		ld	b,a
@@ -147,7 +463,7 @@ begin
 		ld	a,iyh
 	V2SH:
 		ld	e,a
-		ld	d,$C0
+		ld	d,$EF
 		ld	a,(de)
 		nop
 		add	a,b
@@ -158,13 +474,12 @@ begin
 		ld	a,h
 	V3SH:
 		ld	e,a
-		ld	d,$C0
+		ld	d,$EF
 		ld	a,(de)
 		nop
 		add	a,b
 		ld	e,a
-	MIXLAP:
-		ld	d,$C0+58
+		ld	d,$FF			;	keverolap ($EF + 16)
 		ld	a,(de)
 		out	($06),a
 		dec	c
@@ -177,7 +492,6 @@ begin
 		ei
 		ret
 	SidKep:
-	SIDKEPN:
 		ld	c,100
 		ld	a,1
 		ld	(SidFlag),a
@@ -185,329 +499,47 @@ begin
 	");
 end;
 
-/* ---------------------------------------------------------------- kepkocka-varas, keretszin */
-procedure VarKepkocka();
+/* ---------------------------------------------------------------- menu */
+procedure Menu();
 begin
-	asm("
-		xor	a
-		ld	(SidKeret),a
-		out	($00),a
-	VarKor:
-		ld	a,(SidFlag)
-		or	a
-		jr	z,VarKor
-		xor	a
-		ld	(SidFlag),a
-		ld	a,160			;	keret: zold = lejatszo
-		ld	(SidKeret),a
-		out	($00),a
-	");
-end;
-
-/* ---------------------------------------------------------------- a resek atirasa (di/ei) */
-procedure ResIras();
-begin
-	asm("
-		di
-		ld	hl,Res
-		ld	de,V1SH
-		ld	bc,5
-		ldir
-		ld	de,V2SH
-		ld	bc,5
-		ldir
-		ld	de,V3SH
-		ld	bc,5
-		ldir
-		ld	a,(SLo)
-		ld	(V1ST+1),a
-		ld	a,(SHi)
-		ld	(V1ST+2),a
-		ld	a,(SLo+1)
-		ld	(V2ST+1),a
-		ld	a,(SHi+1)
-		ld	(V2ST+2),a
-		ld	a,(SLo+2)
-		ld	(V3ST+1),a
-		ld	a,(SHi+2)
-		ld	(V3ST+2),a
-		ei
-	");
-end;
-
-/* ---------------------------------------------------------------- valtozat: keveres, mintaveteli frekvencia */
-procedure ValtIras();
-begin
-	asm("
-		di
-		ld	a,(MixLap)
-		ld	(MIXLAP+1),a
-		ld	a,(ItPerKep)
-		ld	(SIDKEPN+1),a
-		ld	a,(ItPort4)
-		out	($04),a
-		ei
-	");
-end;
-
-/* ---------------------------------------------------------------- billentyu: 0. sor (port 3 = sor, port $58 = olvasas, 0 = lenyomva) */
-procedure BillOlvas();
-begin
-	asm("
-		ld	a,($0B11)
-		and	$F0
-		out	($03),a
-		in	a,($58)
-		cpl
-		ld	(Billentyu),a
-	");
-end;
-
-/* ---------------------------------------------------------------- jelzo: 4 doboz a kepernyo tetejen (VRAM $8000, 64 byte/sor) */
-procedure Jelzo();
-begin
-	asm("
-		ld	hl,$8404			;	$8000 + 16 sor * 64 + 4
-		ld	c,16
-	JelSor:
-		push	hl
-		ld	b,0
-	JelDoboz:
-		ld	a,(Valt)
-		cp	b
-		ld	a,$F0			;	cian = nem valasztott
-		jr	nz,JelSzin
-		ld	a,$FF			;	sarga = valasztott
-	JelSzin:
-		ld	d,8
-	JelByte:
-		ld	(hl),a
-		inc	hl
-		dec	d
-		jr	nz,JelByte
-		ld	de,8
-		add	hl,de
-		inc	b
-		ld	a,b
-		cp	4
-		jr	nz,JelDoboz
-		pop	hl
-		ld	de,64
-		add	hl,de
-		dec	c
-		jr	nz,JelSor
-	");
-end;
-
-procedure ValtBeallit();
-begin
-	Valt := UjValt;
-	MixLap := $C0 + 59;
-	if (Valt = 0) then MixLap := $C0 + 58;
-	Ratei := 0;
-	ItPort4 := $D9;
-	ItPerKep := 100;
-	if (Valt = 3) then
-	begin
-		Ratei := 1;
-		ItPort4 := $CF;
-		ItPerKep := 80;
-	end;
-	/* a szolo hangok lepese az uj frekvenciahoz */
-	for v := 0 to 3 do
-	begin
-		n := Hang[v];
-		if (Ratei = 0) then
-		begin
-			SLo[v] := StepLo0[n];
-			SHi[v] := StepHi0[n];
-		end
-		else
-		begin
-			SLo[v] := StepLo1[n];
-			SHi[v] := StepHi1[n];
-		end;
-	end;
-	ValtIras();
-	Jelzo();
-end;
-
-/* ---------------------------------------------------------------- lejatszo, kepkockankent */
-procedure Lejatszo();
-begin
-	if (FCnt = 0) then
-	begin
-		if (Dal[DalPos] = 255) then DalPos := 0;
-		for v := 0 to 3 do
-		begin
-			n := Dal[DalPos];
-			ii := Dal[DalPos + 1];
-			DalPos := DalPos + 2;
-			if (n = 1) then Allapot[v] := 2;
-			if (n >= 2) then
-			begin
-				Hang[v] := n;
-				if (Ratei = 0) then
-				begin
-					SLo[v] := StepLo0[n];
-					SHi[v] := StepHi0[n];
-				end
-				else
-				begin
-					SLo[v] := StepLo1[n];
-					SHi[v] := StepHi1[n];
-				end;
-				o := ii * 5;
-				Hullam[v] := Hangszer[o];
-				Att[v] := Hangszer[o + 1];
-				Dek[v] := Hangszer[o + 2];
-				Sus[v] := Hangszer[o + 3];
-				Rel[v] := Hangszer[o + 4];
-				Allapot[v] := 0;
-				Rovid[v] := 0;
-				if (Sus[v] = 0) then Rovid[v] := 1;
-			end;
-		end;
-	end;
-	if (FCnt = 1) then
-	begin
-		for v := 0 to 3 do
-			if (Rovid[v] = 1) then
-			begin
-				Allapot[v] := 2;
-				Rovid[v] := 0;
-			end;
-	end;
-
-	for v := 0 to 3 do
-	begin
-		n := Lvl[v];
-		if (Allapot[v] = 0) then
-		begin
-			if (255 - n <= Att[v]) then
-			begin
-				n := 255;
-				Allapot[v] := 1;
-			end
-			else
-				n := n + Att[v];
-		end
-		else if (Allapot[v] = 1) then
-		begin
-			if (n > Sus[v]) then
-			begin
-				if (n - Sus[v] > Dek[v]) then n := n - Dek[v] else n := Sus[v];
-			end;
-		end
-		else
-		begin
-			if (n > Rel[v]) then n := n - Rel[v] else n := 0;
-		end;
-		Lvl[v] := n;
-
-		if (Valt = 0) then amp := AmpA[n >> 4] else amp := AmpB[n >> 4];
-		o := v * 5;
-		if (amp = 0) then
-		begin
-			Res[o] := $5F;		/* ld e,a */
-			Res[o + 1] := $16;	/* ld d,lap */
-			Res[o + 2] := $C0;
-			Res[o + 3] := $1A;	/* ld a,(de) */
-			Res[o + 4] := 0;	/* nop */
-		end
-		else if (Hullam[v] = 3) then
-		begin
-			Res[o] := $FE;		/* cp PW */
-			Res[o + 1] := PW;
-			Res[o + 2] := $9F;	/* sbc a,a */
-			Res[o + 3] := $E6;	/* and AMP */
-			if (Valt = 0) then Res[o + 4] := amp << 2 else Res[o + 4] := amp;
-		end
-		else
-		begin
-			if (Valt = 0) then
-				lap := $C1 + Hullam[v] * 5 + amp - 1
-			else
-			begin
-				lap := $C0 + 16 + Hullam[v] * 7 + amp - 1;
-				if (Valt >= 2) then
-					if (Hullam[v] = 0) then
-					begin
-						if (Ratei = 0) then o := Sav0[Hang[v]] else o := Sav1[Hang[v]];
-						lap := $C0 + 37 + o * 7 + amp - 1;
-						o := v * 5;
-					end;
-			end;
-			Res[o] := $5F;
-			Res[o + 1] := $16;
-			Res[o + 2] := lap;
-			Res[o + 3] := $1A;
-			Res[o + 4] := 0;
-		end;
-	end;
-
-	/* PWM-sopres 26..230, 3-asaval (mint a modellben) */
-	if (PWIrany = 0) then
-	begin
-		if (PW + 3 > 230) then PWIrany := 1 else PW := PW + 3;
-	end;
-	if (PWIrany = 1) then
-	begin
-		if (PW < 29) then
-		begin
-			PWIrany := 0;
-			PW := PW + 3;
-		end
-		else PW := PW - 3;
-	end;
-
-	FCnt := FCnt + 1;
-	if (FCnt = 6) then FCnt := 0;
+	TVC::Cls();
+	TVC::WriteAt(2, 2, "SIDSoftEMU - SID a TVC-n");
+	TVC::WriteAt(2, 4, "The Last Ninja (1987)");
+	TVC::WriteAt(2, 5, "Ben Daglish, Anthony Lees");
+	TVC::WriteAt(2, 8, "Aldal: 1-9, 0 = 10, A = 11");
+	TVC::WriteAt(2, 10, "Lejatszas kozben:");
+	TVC::WriteAt(2, 11, "barmely gomb = vissza");
+	TVC::WriteAt(2, 14, "Keret: piros = hang-IT,");
+	TVC::WriteAt(2, 15, "zold = lejatszo");
 end;
 
 begin
-	GE::SetGraphics(GE::GRAPHICS4);
-	GE::Init(GE::DIRECT_TO_SCREEN);	/* a firmware IT-kezelot kikapcsolja */
-	GE::SetMemory(GE::MEM_48K_VID);	/* U0, U1, VID, U3 - ROM nelkul, a tablak az U3-ban */
-
-	GE::SetPalette(0, GE::PALETTE_BLACK);
-	GE::SetPalette(1, GE::PALETTE_CYAN);
-	GE::SetPalette(2, GE::PALETTE_RED);
-	GE::SetPalette(3, GE::PALETTE_YELLOW);
-	GE::SetBorder(GE::BORDER_BLACK);
-	GE::ClearScreen(GE::GR4_COLOR0);
-
-	DalPos := 0;
-	FCnt := 0;
-	PW := 128;
-	PWIrany := 0;
-	for v := 0 to 3 do
-	begin
-		Lvl[v] := 0;
-		Allapot[v] := 2;
-		Rovid[v] := 0;
-		Hullam[v] := 0;
-		Hang[v] := 60;
-		SLo[v] := 0;
-		SHi[v] := 0;
-	end;
-
-	SidStart();
-	UjValt := 0;
-	ValtBeallit();
-
+	TVC::SetGraphicsMode(TVC::GRAPHICS4);	/* a hang-IT a port 6-ra GR4 modbitet (1) ir */
+	Menu();
 	while (true) do
 	begin
-		VarKepkocka();
-		Lejatszo();
-		ResIras();
-		/* 1..4 gomb: 0. sor, bit 6 = 1, bit 2 = 2, bit 1 = 3, bit 7 = 4 */
-		BillOlvas();
-		UjValt := Valt;
-		if (Billentyu & $40 <> 0) then UjValt := 0;
-		if (Billentyu & $04 <> 0) then UjValt := 1;
-		if (Billentyu & $02 <> 0) then UjValt := 2;
-		if (Billentyu & $80 <> 0) then UjValt := 3;
-		if (UjValt <> Valt) then ValtBeallit();
+		Kod := TVC::ReadKey();
+		Dal := 0;
+		if (Kod >= $31) then if (Kod <= $39) then Dal := Kod - $30;
+		if (Kod = $30) then Dal := 10;
+		if (Kod = $41) then Dal := 11;
+		if (Kod = $61) then Dal := 11;
+		if (Dal <> 0) then
+		begin
+			Fajlnev[4] := $30;
+			if (Dal >= 10) then Fajlnev[4] := $31;
+			Fajlnev[5] := $30 + Dal;
+			if (Dal >= 10) then Fajlnev[5] := $30 + Dal - 10;
+			TVC::WriteAt(2, 18, "Betoltes...        ");
+			Betolt();
+			if (Hiba = 0) then
+			begin
+				TVC::WriteAt(2, 18, "Szol                ");
+				Lejatszas();
+				Menu();
+			end
+			else
+				TVC::WriteAt(2, 18, "Nincs ilyen fajl!   ");
+		end;
 	end;
 end.

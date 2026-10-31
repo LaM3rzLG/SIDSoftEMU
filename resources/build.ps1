@@ -13,7 +13,9 @@ if ($p.ExitCode -ne 0 -or $hibak -or -not (Test-Path $cas) -or (Get-Item $cas).L
   "FORDITASI HIBA (exit $($p.ExitCode)):"; Get-Content $ki | Select-Object -Last 15; exit 1
 }
 "forditas OK"
-& (Join-Path $PSScriptRoot "make_dsk.ps1") -Out "SIDSoftEMU.dsk" -Files @("SIDSoftEMU.cas=SIDSOFT.CAS") | Select-Object -Last 1
+$lemez = @("SIDSoftEMU.cas=SIDSOFT.CAS")
+Get-ChildItem (Join-Path $Gyoker "dalok") -Filter "DAL*.BIN" -ErrorAction SilentlyContinue | ForEach-Object { $lemez += ("dalok/" + $_.Name + "=" + $_.Name) }
+& (Join-Path $PSScriptRoot "make_dsk.ps1") -Out "SIDSoftEMU.dsk" -Files $lemez | Select-Object -Last 1
 
 # --- WinTVC: a regi peldany bezarasa, uj inditas a friss lemezzel (/d = A: lemez, /a = LOAD"*" -> az elso fajl, SIDSOFT.CAS) ---
 if (-not $NoEmu -and -not $Mac) {

@@ -26,11 +26,25 @@ Testvérprojektek és minták: `../Ugh`, `../WaterPumpGame`.
   a program kódja és adata csak $0000-$7FFF lehet (most $19EF-$1CA3). `GE::Init` kikapcsolja a firmware IT-t;
   ROM-hívás előtt `GE::EnableTVCITHandler()`.
 - Build: Mac `bash resources/build_mac.sh` (Cmd+Shift+B), Windows `resources\build.ps1`; lemezen: `load"SIDSOFT"`.
+  A `dalok/DAL*.BIN` fájlokat mindkét build magától a lemezre teszi.
   A váz az Ugh-ból jött (`tvc_units/`, `resources/kozos.ps1`, `make_dsk.ps1`, `.vscode/tasks.json`).
 
 ## Munkastílus
 Magyarul, tömören; a lemez az igazság; `.bak_<név>` minden változtatás előtt; kétértelmű kérésnél az értelmezést egy
 mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
+
+## SID-fájl lejátszás (2026-10-31, ep128emu-ben fut, a felhasználó még nem hallgatta meg)
+- `sid/Last_Ninja.sid` (HVSC, 11 aldal). PC: `python3 tools/sid2tvc.py sid/Last_Ninja.sid <aldal>` = 6502-emu
+  (`tools/m6502.py`, `sid_dump.py`: hurok a teljes memória ismétlődéséből) -> SID-ADSR szimuláció -> hangonként
+  (lépés, szelet, PW) -> hangonként külön, visszahivatkozásos (REF) folyam -> `dalok/DALnn.BIN` + pontos WAV
+  `hang_minta/Last_Ninja_<n>_tvc.wav`. Formátum a `sid2tvc.py` fejében.
+- **A felhasználó döntése: a dalok lemezfájlból töltődnek** (aldalanként egy fájl), nem a programba fordítva.
+- TVC (`SIDSoftEMU.ras`, a régi 4 változatos teszt: `.bak_teszt4`): menü ROM-mal (1-9, 0=10, A=11) -> betöltés
+  (Lemmings-sorrend; a $C000 feletti rész előbb $8000-ra, onnan U3-ba) -> lejátszás **$B0 lapozással (teljes 64K
+  RAM)**, dal $4000-tól (max 44800 B), táblák $EF00-$FFFF; bármely gomb = vissza a ROM-nak ($38 = F5 3E 70,
+  port 5, CRTC R10/R11 = 3) és a menübe. Dekódoló asm-ben: zöld sáv ~2-3%.
+- Méretek: 26-41 KB; **az 5. aldal 47 KB, nem fér el** (nincs a lemezen) - jobb tömörítés kell (pl. 2 szintű REF).
+  A 2. és 9. aldalnak 10 percen belül nincs hurka (10 perc után elölről).
 
 ## Állapot (2026-10-31, munkamenet lezárva - új projekt jött)
 - **4 változatos teszt kész és fut** (ep128emu): `SIDSoftEMU.ras`, 1..4 gomb élőben vált; táblák 15,5 KB az U3-ban

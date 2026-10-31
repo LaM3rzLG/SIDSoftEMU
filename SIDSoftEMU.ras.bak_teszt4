@@ -1,0 +1,513 @@
+program SIDSoftEMU;
+@use "TVC"
+@use "GE"
+
+/* SIDSoftEMU - teszt (2026-10-31): 3 hangos SID-szeru szintezis, 4 valtozat az 1..4 gombokon.
+   1: hangonkent 6 szint, nyers hullamok (5008 Hz)      2: hangonkent 8 szint + lagyan tomorito keveres
+   3: mint 2 + savkorlatozott ("szurt") fures            4: mint 3, de 3986 Hz (kevesebb gepido)
+   - Memoria: U0, U1, VID, U3 (GE::MEM_48K_VID) - ROM nincs bent; a hangtablak $C000-$FDFF (U3).
+   - Hang-IT: 3 fazisszamlalo IX, IY, HL'. Hangonkent 5 byte-os onmodosito res (V1SH..V3SH): tabla
+     (ld e,a / ld d,lap / ld a,(de) / nop) vagy negyszog (cp PW / sbc a,a / and AMP). Az osszeg egy keverotablan
+     (MIXLAP) at megy a port 6-ra (a tabla erteke mar tartalmazza a grafikus mod bitjeit).
+   - A fo program kepkockankent (100 ill. 80 IT) futtatja a lejatszot, majd di/ei kozott atirja a reseket.
+   - Meres a keretben: IT = PIROS, lejatszo = ZOLD, szabad = FEKETE.
+   TILOS a fo programban: IX, IY, shadow regiszterek -> GE rutinok sem, amig a hang szol.
+   Adat: tools/sid_tvc_adat.py -> resources/sid_tablak.bin ($C000), resources/sid_adat.bin ($7000).
+   A program vege < $7000 kell legyen (.sym: EndBlock). */
+
+var
+	SidTablak	:	incbin("resources/sid_tablak.bin");
+	SidAdat		:	incbin("resources/sid_adat.bin");
+
+	/* a $7000-ra masolt adat reszei */
+	StepLo0	:	array[128] of byte at $7000;
+	StepHi0	:	array[128] of byte at $7080;
+	StepLo1	:	array[128] of byte at $7100;
+	StepHi1	:	array[128] of byte at $7180;
+	Sav0	:	array[128] of byte at $7200;
+	Sav1	:	array[128] of byte at $7280;
+	AmpA	:	array[16] of byte at $7300;
+	AmpB	:	array[16] of byte at $7310;
+	Hangszer:	array[40] of byte at $7320;
+	Dal		:	array[2048] of byte at $7360;
+
+	/* hangonkenti allapot */
+	Lvl		:	array[3] of byte;
+	Allapot	:	array[3] of byte;	/* 0 attack, 1 decay/sustain, 2 release */
+	Rovid	:	array[3] of byte;
+	Hullam	:	array[3] of byte;
+	Att		:	array[3] of byte;
+	Dek		:	array[3] of byte;
+	Sus		:	array[3] of byte;
+	Rel		:	array[3] of byte;
+	Hang	:	array[3] of byte;	/* a szolo MIDI hang (a lepes ujraszamolasahoz valtaskor) */
+	SLo		:	array[3] of byte;
+	SHi		:	array[3] of byte;
+	Res		:	array[15] of byte;	/* 3 x 5 byte a V1SH..V3SH-ba */
+
+	DalPos	:	integer;
+	FCnt, v, n, ii, amp, o, PW, PWIrany, lap	:	byte;
+	Valt, UjValt, Billentyu	:	byte;	/* valtozat 0..3 */
+	Ratei	:	byte;		/* 0 = 5008 Hz, 1 = 3986 Hz */
+	ItPort4, ItPerKep, MixLap	:	byte;
+
+/* ---------------------------------------------------------------- hang-IT + inditas */
+procedure SidStart();
+begin
+	asm("
+		di
+		ld	hl,SidTablak
+		ld	de,$C000
+		ld	bc,$3E00			;	62 lap. FIGYELEM: az OrgAsm a cimke-kulonbseget 0-ra forditja (ldir 64 KB!)
+		ldir
+		ld	hl,SidAdat
+		ld	de,$7000
+		ld	bc,$0961			;	sid_adat.bin hossza (a tools/sid_tvc_adat.py kiirja)
+		ldir
+		ld	hl,V1SH
+		call	SidResCsend
+		ld	hl,V2SH
+		call	SidResCsend
+		ld	hl,V3SH
+		call	SidResCsend
+		ld	ix,0
+		ld	iy,0
+		exx
+		ld	hl,0
+		ld	c,100
+		ld	b,0
+		exx
+		ld	hl,$38
+		ld	(hl),195
+		ld	de,SidIT
+		inc	hl
+		ld	(hl),e
+		inc	hl
+		ld	(hl),d
+		;	hang-IT: 5008 Hz (mint a music.tru)
+		ld	a,($0B12)
+		and	128+64
+		or	15+32
+		ld	($0B12),a
+		ld	c,91
+		in	b,(c)
+		out	($05),a
+		ld	a,$D9
+		out	($04),a
+		;	kurzor-IT ki (CRTC R10/R11 bit 5)
+		ld	a,10
+		out	($70),a
+		ld	a,3+32
+		out	($71),a
+		ld	a,11
+		out	($70),a
+		ld	a,3+32
+		out	($71),a
+		im	1			;	IM 1: a $38-ra ugrik (a rendszer IM 2-es tablaja a ROM-ban van, az most nincs bent)
+		ei
+		ret
+
+	SidResCsend:
+		ld	(hl),$5F
+		inc	hl
+		ld	(hl),$16
+		inc	hl
+		ld	(hl),$C0
+		inc	hl
+		ld	(hl),$1A
+		inc	hl
+		ld	(hl),0
+		ret
+
+	SidFlag:
+		db	0
+	SidKeret:
+		db	0
+
+	;	------------------------------------------------ A HANG-IT
+	SidIT:
+		ex	af,af'
+		exx
+		out	($07),a
+		ld	a,136			;	keret: piros (meres)
+		out	($00),a
+	V1ST:
+		ld	de,0
+		add	ix,de
+		ld	a,ixh
+	V1SH:
+		ld	e,a
+		ld	d,$C0
+		ld	a,(de)
+		nop
+		ld	b,a
+	V2ST:
+		ld	de,0
+		add	iy,de
+		ld	a,iyh
+	V2SH:
+		ld	e,a
+		ld	d,$C0
+		ld	a,(de)
+		nop
+		add	a,b
+		ld	b,a
+	V3ST:
+		ld	de,0
+		add	hl,de
+		ld	a,h
+	V3SH:
+		ld	e,a
+		ld	d,$C0
+		ld	a,(de)
+		nop
+		add	a,b
+		ld	e,a
+	MIXLAP:
+		ld	d,$C0+58
+		ld	a,(de)
+		out	($06),a
+		dec	c
+		jr	z,SidKep
+	SidVege:
+		ld	a,(SidKeret)
+		out	($00),a
+		exx
+		ex	af,af'
+		ei
+		ret
+	SidKep:
+	SIDKEPN:
+		ld	c,100
+		ld	a,1
+		ld	(SidFlag),a
+		jr	SidVege
+	");
+end;
+
+/* ---------------------------------------------------------------- kepkocka-varas, keretszin */
+procedure VarKepkocka();
+begin
+	asm("
+		xor	a
+		ld	(SidKeret),a
+		out	($00),a
+	VarKor:
+		ld	a,(SidFlag)
+		or	a
+		jr	z,VarKor
+		xor	a
+		ld	(SidFlag),a
+		ld	a,160			;	keret: zold = lejatszo
+		ld	(SidKeret),a
+		out	($00),a
+	");
+end;
+
+/* ---------------------------------------------------------------- a resek atirasa (di/ei) */
+procedure ResIras();
+begin
+	asm("
+		di
+		ld	hl,Res
+		ld	de,V1SH
+		ld	bc,5
+		ldir
+		ld	de,V2SH
+		ld	bc,5
+		ldir
+		ld	de,V3SH
+		ld	bc,5
+		ldir
+		ld	a,(SLo)
+		ld	(V1ST+1),a
+		ld	a,(SHi)
+		ld	(V1ST+2),a
+		ld	a,(SLo+1)
+		ld	(V2ST+1),a
+		ld	a,(SHi+1)
+		ld	(V2ST+2),a
+		ld	a,(SLo+2)
+		ld	(V3ST+1),a
+		ld	a,(SHi+2)
+		ld	(V3ST+2),a
+		ei
+	");
+end;
+
+/* ---------------------------------------------------------------- valtozat: keveres, mintaveteli frekvencia */
+procedure ValtIras();
+begin
+	asm("
+		di
+		ld	a,(MixLap)
+		ld	(MIXLAP+1),a
+		ld	a,(ItPerKep)
+		ld	(SIDKEPN+1),a
+		ld	a,(ItPort4)
+		out	($04),a
+		ei
+	");
+end;
+
+/* ---------------------------------------------------------------- billentyu: 0. sor (port 3 = sor, port $58 = olvasas, 0 = lenyomva) */
+procedure BillOlvas();
+begin
+	asm("
+		ld	a,($0B11)
+		and	$F0
+		out	($03),a
+		in	a,($58)
+		cpl
+		ld	(Billentyu),a
+	");
+end;
+
+/* ---------------------------------------------------------------- jelzo: 4 doboz a kepernyo tetejen (VRAM $8000, 64 byte/sor) */
+procedure Jelzo();
+begin
+	asm("
+		ld	hl,$8404			;	$8000 + 16 sor * 64 + 4
+		ld	c,16
+	JelSor:
+		push	hl
+		ld	b,0
+	JelDoboz:
+		ld	a,(Valt)
+		cp	b
+		ld	a,$F0			;	cian = nem valasztott
+		jr	nz,JelSzin
+		ld	a,$FF			;	sarga = valasztott
+	JelSzin:
+		ld	d,8
+	JelByte:
+		ld	(hl),a
+		inc	hl
+		dec	d
+		jr	nz,JelByte
+		ld	de,8
+		add	hl,de
+		inc	b
+		ld	a,b
+		cp	4
+		jr	nz,JelDoboz
+		pop	hl
+		ld	de,64
+		add	hl,de
+		dec	c
+		jr	nz,JelSor
+	");
+end;
+
+procedure ValtBeallit();
+begin
+	Valt := UjValt;
+	MixLap := $C0 + 59;
+	if (Valt = 0) then MixLap := $C0 + 58;
+	Ratei := 0;
+	ItPort4 := $D9;
+	ItPerKep := 100;
+	if (Valt = 3) then
+	begin
+		Ratei := 1;
+		ItPort4 := $CF;
+		ItPerKep := 80;
+	end;
+	/* a szolo hangok lepese az uj frekvenciahoz */
+	for v := 0 to 3 do
+	begin
+		n := Hang[v];
+		if (Ratei = 0) then
+		begin
+			SLo[v] := StepLo0[n];
+			SHi[v] := StepHi0[n];
+		end
+		else
+		begin
+			SLo[v] := StepLo1[n];
+			SHi[v] := StepHi1[n];
+		end;
+	end;
+	ValtIras();
+	Jelzo();
+end;
+
+/* ---------------------------------------------------------------- lejatszo, kepkockankent */
+procedure Lejatszo();
+begin
+	if (FCnt = 0) then
+	begin
+		if (Dal[DalPos] = 255) then DalPos := 0;
+		for v := 0 to 3 do
+		begin
+			n := Dal[DalPos];
+			ii := Dal[DalPos + 1];
+			DalPos := DalPos + 2;
+			if (n = 1) then Allapot[v] := 2;
+			if (n >= 2) then
+			begin
+				Hang[v] := n;
+				if (Ratei = 0) then
+				begin
+					SLo[v] := StepLo0[n];
+					SHi[v] := StepHi0[n];
+				end
+				else
+				begin
+					SLo[v] := StepLo1[n];
+					SHi[v] := StepHi1[n];
+				end;
+				o := ii * 5;
+				Hullam[v] := Hangszer[o];
+				Att[v] := Hangszer[o + 1];
+				Dek[v] := Hangszer[o + 2];
+				Sus[v] := Hangszer[o + 3];
+				Rel[v] := Hangszer[o + 4];
+				Allapot[v] := 0;
+				Rovid[v] := 0;
+				if (Sus[v] = 0) then Rovid[v] := 1;
+			end;
+		end;
+	end;
+	if (FCnt = 1) then
+	begin
+		for v := 0 to 3 do
+			if (Rovid[v] = 1) then
+			begin
+				Allapot[v] := 2;
+				Rovid[v] := 0;
+			end;
+	end;
+
+	for v := 0 to 3 do
+	begin
+		n := Lvl[v];
+		if (Allapot[v] = 0) then
+		begin
+			if (255 - n <= Att[v]) then
+			begin
+				n := 255;
+				Allapot[v] := 1;
+			end
+			else
+				n := n + Att[v];
+		end
+		else if (Allapot[v] = 1) then
+		begin
+			if (n > Sus[v]) then
+			begin
+				if (n - Sus[v] > Dek[v]) then n := n - Dek[v] else n := Sus[v];
+			end;
+		end
+		else
+		begin
+			if (n > Rel[v]) then n := n - Rel[v] else n := 0;
+		end;
+		Lvl[v] := n;
+
+		if (Valt = 0) then amp := AmpA[n >> 4] else amp := AmpB[n >> 4];
+		o := v * 5;
+		if (amp = 0) then
+		begin
+			Res[o] := $5F;		/* ld e,a */
+			Res[o + 1] := $16;	/* ld d,lap */
+			Res[o + 2] := $C0;
+			Res[o + 3] := $1A;	/* ld a,(de) */
+			Res[o + 4] := 0;	/* nop */
+		end
+		else if (Hullam[v] = 3) then
+		begin
+			Res[o] := $FE;		/* cp PW */
+			Res[o + 1] := PW;
+			Res[o + 2] := $9F;	/* sbc a,a */
+			Res[o + 3] := $E6;	/* and AMP */
+			if (Valt = 0) then Res[o + 4] := amp << 2 else Res[o + 4] := amp;
+		end
+		else
+		begin
+			if (Valt = 0) then
+				lap := $C1 + Hullam[v] * 5 + amp - 1
+			else
+			begin
+				lap := $C0 + 16 + Hullam[v] * 7 + amp - 1;
+				if (Valt >= 2) then
+					if (Hullam[v] = 0) then
+					begin
+						if (Ratei = 0) then o := Sav0[Hang[v]] else o := Sav1[Hang[v]];
+						lap := $C0 + 37 + o * 7 + amp - 1;
+						o := v * 5;
+					end;
+			end;
+			Res[o] := $5F;
+			Res[o + 1] := $16;
+			Res[o + 2] := lap;
+			Res[o + 3] := $1A;
+			Res[o + 4] := 0;
+		end;
+	end;
+
+	/* PWM-sopres 26..230, 3-asaval (mint a modellben) */
+	if (PWIrany = 0) then
+	begin
+		if (PW + 3 > 230) then PWIrany := 1 else PW := PW + 3;
+	end;
+	if (PWIrany = 1) then
+	begin
+		if (PW < 29) then
+		begin
+			PWIrany := 0;
+			PW := PW + 3;
+		end
+		else PW := PW - 3;
+	end;
+
+	FCnt := FCnt + 1;
+	if (FCnt = 6) then FCnt := 0;
+end;
+
+begin
+	GE::SetGraphics(GE::GRAPHICS4);
+	GE::Init(GE::DIRECT_TO_SCREEN);	/* a firmware IT-kezelot kikapcsolja */
+	GE::SetMemory(GE::MEM_48K_VID);	/* U0, U1, VID, U3 - ROM nelkul, a tablak az U3-ban */
+
+	GE::SetPalette(0, GE::PALETTE_BLACK);
+	GE::SetPalette(1, GE::PALETTE_CYAN);
+	GE::SetPalette(2, GE::PALETTE_RED);
+	GE::SetPalette(3, GE::PALETTE_YELLOW);
+	GE::SetBorder(GE::BORDER_BLACK);
+	GE::ClearScreen(GE::GR4_COLOR0);
+
+	DalPos := 0;
+	FCnt := 0;
+	PW := 128;
+	PWIrany := 0;
+	for v := 0 to 3 do
+	begin
+		Lvl[v] := 0;
+		Allapot[v] := 2;
+		Rovid[v] := 0;
+		Hullam[v] := 0;
+		Hang[v] := 60;
+		SLo[v] := 0;
+		SHi[v] := 0;
+	end;
+
+	SidStart();
+	UjValt := 0;
+	ValtBeallit();
+
+	while (true) do
+	begin
+		VarKepkocka();
+		Lejatszo();
+		ResIras();
+		/* 1..4 gomb: 0. sor, bit 6 = 1, bit 2 = 2, bit 1 = 3, bit 7 = 4 */
+		BillOlvas();
+		UjValt := Valt;
+		if (Billentyu & $40 <> 0) then UjValt := 0;
+		if (Billentyu & $04 <> 0) then UjValt := 1;
+		if (Billentyu & $02 <> 0) then UjValt := 2;
+		if (Billentyu & $80 <> 0) then UjValt := 3;
+		if (UjValt <> Valt) then ValtBeallit();
+	end;
+end.
