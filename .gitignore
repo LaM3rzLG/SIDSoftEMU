@@ -10,3 +10,5 @@ SIDSoftEMU.dsk
 hang_minta/
 __pycache__/
 
+tools/sid2tvc/sid2tvc
+tools/sid2tvc/sid2tvc.exe

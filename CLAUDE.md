@@ -52,6 +52,13 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   A program most $2295-ig tart -> a dal kezdete $5000 helyett ~$2300 lehet (~51 KB hely, az 5. aldal is elfér).
   Tanulságok (a skillben): fájlírás asm-ből, IY/AF' visszaállítás ROM-hívás előtt, ep128emu lemezkép-puffer,
   freeTVC headless + monitor `profile` a pontos méréshez, OrgAsm `(ix+NEV+1)` hiba.
+- **`tools/sid2tvc/` = az önálló C-s átalakító (C99, egy fájl, Mac/Linux/Windows; README + Makefile)** - a
+  felhasználó döntése: C, fordítási útmutatóval. A Last Ninja 9 aldalán BÁJTRA egyezik a Python-referenciával
+  (`tools/sid2tvc.py` + `m6502.py` + `sid_dump.py` - befagyasztva, a fejlesztés a C-ben megy tovább). Tud: illegális
+  6502-utasítások, RSID / play=0 (IRQ-vektor), `-a` összes aldal, `-w` WAV, `-o` mappa. Bináris: gitignore.
+  Próba más dalokkal (HVSC: Hubbard, Galway, Tel): **a legtöbbnek nincs pontos memória-hurka 10 percen belül ->
+  58-80 KB, nem fér el -> HUROKKERESÉS a legfontosabb** (pl. a kimenet ismétlődése); Tel "Wizzy": BRK az 1.
+  képkockán (vizsgálni); kell `-n NÉV` (a 8 karakteres név ütközhet).
 - Folytatási ötletek: hangminőség (szűrő közelítése táblával, finomabb szintek/keverés, zaj), 5. aldal
   tömörítése, más .sid-ek kipróbálása, dal neve a fájlból a menüben.
 
