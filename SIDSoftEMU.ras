@@ -1941,6 +1941,11 @@ begin
 		ld	(Ir16_Szoveg),hl
 	");
 	Kozepre(122, Ir16_Szoveg);
+	while (GE::Pressed(GE::KEY_ESC)) do		/* a kerdest nyito ESC elengedese */
+	begin
+		GE::WaitForSync();
+		GE::GetKeyboard();
+	end;
 	k := 0;
 	while (k = 0) do
 	begin
@@ -1948,11 +1953,17 @@ begin
 		GE::GetKeyboard();
 		if (GE::Pressed(GE::KEY_I)) then k := 1;
 		if (GE::Pressed(GE::KEY_N)) then k := 2;
+		if (GE::Pressed(GE::KEY_ESC)) then k := 2;	/* ESC = Nem (nincs kiirva) */
 	end;
-	while (GE::Pressed(GE::KEY_I) or GE::Pressed(GE::KEY_N)) do	/* elengedesre var (a BASIC ne kapja meg) */
+	j := 1;
+	while (j = 1) do						/* elengedesre var (a BASIC ne kapja meg) */
 	begin
 		GE::WaitForSync();
 		GE::GetKeyboard();
+		j := 0;
+		if (GE::Pressed(GE::KEY_I)) then j := 1;
+		if (GE::Pressed(GE::KEY_N)) then j := 1;
+		if (GE::Pressed(GE::KEY_ESC)) then j := 1;
 	end;
 	if (k = 2) then
 	begin

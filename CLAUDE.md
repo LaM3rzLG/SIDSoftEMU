@@ -72,7 +72,7 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   nincs memória-ellenőrzés.
 
 ## Kilépés (2026-11-01, freeTVC headless-ben kipróbálva)
-ESC a gyökérben -> `Kilepes`: doboz középen „Biztosan kilépsz?” I/N (a felhasználó kérése). N = `Rajz()`. I = elengedésre
+ESC a gyökérben -> `Kilepes`: doboz középen „Biztosan kilépsz?” I/N (a felhasználó kérése). N vagy ESC (nincs kiírva) = `Rajz()`. I = elengedésre
 vár, `GE::EnableTVCITHandler`, $70 lapozás, a BASIC IX/IY/második regiszterkészlete vissza (`IndMent` a főprogram elején:
 `IndSP` ...), `GE::SetGraphics(GRAPHICS4)` (ROM VMODE), `ld sp,(IndSP) / ret` -> a „10 PRINT USR(6659)” kiír egy számot
 (pl. 85), aztán `ok`. A szövegek asm `db`-ben (a TRSE a "..." konstansokat a rezidens részbe tenné: +48 B, túlcsordult);
