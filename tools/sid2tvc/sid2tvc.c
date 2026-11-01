@@ -56,7 +56,7 @@
 
 /* ------------------------------------------------------------------ TVC-oldali allandok */
 #define SONG_BASE   0x2300              /* a dal cime a TVC-n */
-#define TABLE_BASE  0xF000              /* a hangtablak: $F000-$FDFF paletta (a .STC-bol), $FE00 zaj, $FF00 szintlap */
+#define TABLE_BASE  0xEF00              /* $EF00 keret-szintabla, $F000-$FDFF paletta (a .STC-bol), $FE00 zaj, $FF00 szintlap */
 #define SONG_MAX    (TABLE_BASE - SONG_BASE)
 #define IT_PER_FRAME 100
 #define PAL_CLK     985248.0

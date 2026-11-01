@@ -11,7 +11,7 @@ program SIDSoftEMU;
    - Betoltes a ROM-mal (Lemmings-sorrend: $0B0A:=0, $D3 nyitas, $D2 olvasas, $D4 zaras), firmware IT-vel, $70
      lapozassal. A fajl: 2 byte hossz, aztan a dal $C000 feletti resze ($8000-ra = U2, onnan U3-ba), vegul $2300-$BFFF.
    - Lejatszas: teljes 64K RAM ($B0), tablak $F000-$FFFF (paletta a fajlbol, TablaGen: zaj + szintlap), dal $2300-tol
-     (max 52 480 B). Sajat hang-IT a
+     (max 52 224 B; $EF00 = keret-szintabla). Sajat hang-IT a
      $38-on; kilepeskor a rendszer-IT visszaall, majd a fajlkezelo a sajat (logo) IT-jet teszi vissza.
    - Hang-IT: 3 fazisszamlalo IX, IY, HL'. Hangonkent 10 byte-os onmodosito res (tabla + szintlap, vagy negyszog-PWM).
      A port 6-ra a GR16 modbit (2) megy.
@@ -632,6 +632,10 @@ begin
 	SidOfs:
 		add	a,30			;	DC-kiegyenlites + GR16 modbit (kepkockankent irja a fo hurok)
 		out	($06),a
+		ld	e,a				;	keret = a kimenet szine ($EF00-s lap, a Jatszik tolti)
+		ld	d,$EF
+		ld	a,(de)
+		out	($00),a
 		dec	c
 		jr	z,SidKep
 	SidVege:
@@ -1852,6 +1856,36 @@ begin
 	Ir16(2, 35, p);
 	Ir16(Ir16_X, 35, #PerJel);
 	Ir16(Ir16_X, 35, #Nev);
+	/* keret-szintabla ($EF00, U3): index = a port 6 erteke (szint x 4 + 2); a szin a kozepszinttol valo elteres
+	   szerint (csend = fekete ... fehér) */
+	asm("
+		di
+		ld	a,$B0
+		out	($02),a
+		ld	hl,$EF00
+	KsGen:
+		ld	a,l
+		rrca
+		rrca
+		and	15
+		ld	e,a
+		ld	d,0
+		push	hl
+		ld	hl,KsSzin
+		add	hl,de
+		ld	a,(hl)
+		pop	hl
+		ld	(hl),a
+		inc	l
+		jr	nz,KsGen
+		ld	a,($0003)
+		out	($02),a
+		ei
+		jr	KsVege
+	KsSzin:
+		db	$AA,$A8,$A0,$A2,$22,$82,$02,$00,$00,$02,$82,$22,$A2,$A0,$A8,$AA
+	KsVege:
+	");
 	DalJatszas();
 	asm("
 	JtElenged:
