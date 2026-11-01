@@ -144,9 +144,11 @@ asm-ben a `p` változónév nem használható (feltételkód).
   Próba más dalokkal (HVSC: Hubbard, Galway, Tel): **a legtöbbnek nincs pontos memória-hurka 10 percen belül ->
   58-80 KB, nem fér el -> HUROKKERESÉS a legfontosabb** (pl. a kimenet ismétlődése); Tel "Wizzy": BRK az 1.
   képkockán (vizsgálni); kell `-n NÉV` (a 8 karakteres név ütközhet).
+- **2026-11-02: a Last Ninja 3 KIKERÜLT** (a felhasználó kérése: a .sid és a `sid_tvc/LNINJA3` is); most LN1 (11 dal) +
+  LN2 (12 dal). A lenti LN3-as sorok történetiek.
 - **Last Ninja 1-2-3 (2026-10-31):** `sid/Last_Ninja_{1,2,3}.sid` -> `sid_tvc/LNINJA{1,2,3}/SONGn.STC`
   (`sid2tvc -a -n LNINJAj -o sid_tvc`), lemezen `SID_TVC\LNINJAj\SONGn.STC`. 33/34 dal; hiányzik az **LN2 12.** (59 KB).
-  Két lemezkép (~1 MB): `SIDSoftEMU.dsk` (LN1+LN3), `SIDSOFT2.dsk` (LN2; build: LEMEZ2 / $Lemez2); a dalok természetes
+  Két lemezkép (~1 MB): `SIDSoftEMU.dsk` (LN1; 2026-11-02 előtt LN1+LN3), `SIDSOFT2.dsk` (LN2; build: LEMEZ2 / $Lemez2); a dalok természetes
   sorrendben (sort -V) kerülnek fel, mert a fájlkezelő a lemez sorrendjében listáz.
 - **Hurok két módszerrel (2026-10-31, sid2tvc.c `hang_hurok`):** memória-hurok + a hallható TVC-állapot ismétlődése, a
   rövidebb dal nyer (`[memoria]`/`[hang]` a kiírásban; `-m` = csak memória). Hurok nélküli dalnál 20 percet elemez.
