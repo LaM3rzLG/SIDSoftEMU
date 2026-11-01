@@ -37,12 +37,18 @@ Testvérprojektek és minták: `../Ugh`, `../WaterPumpGame`.
 2. **Okos hangerő-elosztás:** a PC képkockánként osztja szét a DAC 16 szintjét a szóló hangok között (egy hang = mind a 16).
 3. (utána) **Dobok mintából:** a PC felismeri a dobütéseket, rövid 4 bites minták (1–3 KB/dal); 4. **tempó** a gyorsított
    (CIA) zenéknél (lépés/s a fejlécben).
-**Állapot (2026-11-01): az 1+2 a PC-n KÉSZ, a felhasználó hallgatja** (`hang_minta/AB/LNx_n_{A_sid,B_most,C_paletta,
-D_hangero}.wav`, 60 s; A = valódi SID: `tools/sid_ref` (brew libsidplayfp, SIDLite), felhangosítva). `sid2tvc -U [-K = fényes, sávkorlát nélkül: E_fenyes] [-t MP]
-[-P N]` = kísérleti ág (`uj_hang`), a .STC bájtra változatlan. Gépi mérés (log-spektrum 60-2500 Hz, 33 dal): B 8,16 /
-C 7,96 / D 7,53 dB; a D sokat javít ott, ahol szűrt/halk hangok vannak, másutt ±0,5 dB. A 2,5 kHz feletti hangok a TVC-n
-eleve nem szólhatnak (Nyquist) - a D-ben elnémulnak, a B-ben tükröződnek. TVC-költség D-nél: 2. táblakeresés + hangonként
-egy szint-lap, kezdőérték (DC) képkockánként, 4 KB/dal paletta.
+**Állapot (2026-11-01): az 1+2 KÉSZ a TVC-n is (.STC 1.2), a felhasználó tesztje hátravan.** A/B (`hang_minta/AB/`,
+60 s: A = valódi SID `tools/sid_ref` (brew libsidplayfp, SIDLite), B = régi, C/D/E = kísérletek, F = végleges): a felhasználó
+az **E**-t választotta (sávkorlát nélkül, fényes). A dinamikus (képkockánkénti) erősítéssel a dalok ~2x nagyobbak lettek
+(a REF nem talál) -> **dalonként állandó erősítés** (99. percentilis = 15) + szint-hiszterézis (0,9) + tábla-hiszterézis
+(1,3x): mérve ugyanolyan jó (log-spektrum 60-2500 Hz), méret ~ a régi + 15%. 33/34 dal fér el (LN2/12: 53 742 > 52 480).
+TVC: rés 10 byte (`ld e,a / ld d,$F0+t / ld a,(de) / or szint / ld e,a / ld d,$FF / ld a,(de)` vagy négyszög
+`cp PW / sbc a,a / and szint*4 / jr +3`, `db`-vel, hogy a TRSE optimalizálója ne nyúljon hozzá), keverőlap helyett
+`SidOfs: add a,K` (K = (15 - szintek)/2*4 + 2 = DC + GR16 modbit). IT ~330 T / 624 (~53%, régi ~44%). RezVege $22DC.
+freeTVC headless-ben ellenőrizve: paletta/zaj/szintlap/dal a memóriában bájtra, a rések és a K helyes.
+freeTVC headless Macen: `--preset 64k-1.2 --rom-dir ~/Documents/FreeTVC/build/mac-release/src/roms --disk-card --disk-rom 1.2
+--disk X.dsk --type '\n@600' --type 'load"SIDSOFT"\n@700' --key DOWN@4550 --key RETURN@4600 ... --wav/--screenshot/--save-snapshot`
+(preset nélkül nem indul; az első gépelt betűk elvesznek, ezért előbb egy \n); memória: `--moncommands` `undump`, `bsave`.
 Menet: MINDENT előbb a PC-n, WAV A/B-vel (valódi SID-referencia / mostani TVC / új TVC) - a felhasználó dönt, csak ami
 neki jobb, az megy a TVC-re. Az 1+2 együtt (ugyanaz a lejátszó-módosítás). A HVSC tömeges átalakítása (61 159 SID,
 ~6–10 óra párhuzamosan) KÉSŐBBRE halasztva.

@@ -2,16 +2,19 @@ program SIDSoftEMU;
 @use "GE"
 
 /* SIDSoftEMU - SID-lejatszo (2026-11-01): a .sid-bol PC-n keszult dal (tools/sid2tvc -> sid_tvc/<NEV>/SONGn.STC)
-   lemezrol, 3 hang 5008 Hz-en ("A" valtozat: hangonkent 0..5 szint, osszeg a port 6-ra).
+   lemezrol, 3 hang 5008 Hz-en. .STC 1.2 (2026-11-01): dalonkenti hangszinpaletta (14 tabla, $F000-$FDFF) + zaj ($FE00),
+   hangonkent szint 0..15 a szintlappal ($FF00), a harom osszege + DC-kiegyenlites a port 6-ra.
    - Fajlkezelo (a FajlTeszt16-bol, cimke fajlteszt16-kesz): GRAPHICS16, GE unit, Ir16 aranyos 16 szinu kiiro
      (font16_kek_cian.bin), csuszo kiemelo sav (a kep maga a maszk), forgo C64-logo megszakitasbol (LogoIT a $38-on).
      Konyvtar: a lemez-ROM FISH hivasa. Fel/Le, Balra/Jobbra = lapozas, Enter = konyvtar / .STC lejatszasa,
      ESC = feljebb. Lejatszas kozben barmely gomb = vissza.
    - Betoltes a ROM-mal (Lemmings-sorrend: $0B0A:=0, $D3 nyitas, $D2 olvasas, $D4 zaras), firmware IT-vel, $70
      lapozassal. A fajl: 2 byte hossz, aztan a dal $C000 feletti resze ($8000-ra = U2, onnan U3-ba), vegul $2300-$BFFF.
-   - Lejatszas: teljes 64K RAM ($B0), tablak $EF00-$FFFF (TablaGen), dal $2300-tol (max 52 224 B). Sajat hang-IT a
+   - Lejatszas: teljes 64K RAM ($B0), tablak $F000-$FFFF (paletta a fajlbol, TablaGen: zaj + szintlap), dal $2300-tol
+     (max 52 480 B). Sajat hang-IT a
      $38-on; kilepeskor a rendszer-IT visszaall, majd a fajlkezelo a sajat (logo) IT-jet teszi vissza.
-   - Hang-IT: 3 fazisszamlalo IX, IY, HL'. Hangonkent 5 byte-os onmodosito res. A port 6-ra a GR16 modbit (2) megy.
+   - Hang-IT: 3 fazisszamlalo IX, IY, HL'. Hangonkent 10 byte-os onmodosito res (tabla + szintlap, vagy negyszog-PWM).
+     A port 6-ra a GR16 modbit (2) megy.
    - A keret fekete (a korabbi meres - IT piros, lejatszo zold - a felhasznalo kerese szerint kiveve, 2026-11-01).
    TILOS a fo programban lejatszas kozben: IX, IY, shadow regiszterek, ROM-hivas.
    MEMORIA: a REZIDENS resz (valtozok, GE unit, Betolt, Lejatszas, DalJatszas) vege = RezVege < $2300 kell (.sym)!
@@ -98,18 +101,31 @@ begin
 		ld	hl,(BtHossz)
 		ld	a,h
 		and	l
-		inc	a
-		jr	nz,BtRegi			;	nem $FFFF: 1.0-s fajl
-		ld	de,$8000			;	1.1: az info-blokk (96 byte) atugrasa (U2, a dal ugyis felulirja)
-		ld	bc,96
+		cp	$FE
+		jr	z,BtUj				;	$FFFE = 1.2
+		ld	a,2					;	1.0 / 1.1: regi formatum
+		ld	(Hiba),a
+		jr	BtZar
+	BtUj:
+		ld	de,$8000			;	az info-blokk (96 byte) + a paletta (14 x 256) U2-be...
+		ld	bc,96+3584
 		rst	$30
 		db	$D2
+		di
+		ld	a,$B0				;	...a paletta onnan U3-ba ($F000-$FDFF)
+		out	($02),a
+		ld	hl,$8000+96
+		ld	de,$F000
+		ld	bc,3584
+		ldir
+		ld	a,($0003)
+		out	($02),a
+		ei
 		ld	de,BtHossz
 		ld	bc,2
 		rst	$30
 		db	$D2
 		ld	hl,(BtHossz)
-	BtRegi:
 		ld	de,$C000-$2300		;	a $2300-$BFFF resz hossza
 		or	a
 		sbc	hl,de
@@ -140,6 +156,7 @@ begin
 		ld	de,$2300
 		rst	$30
 		db	$D2
+	BtZar:
 		xor	a
 		rst	$30
 		db	$D4					;	zaras (olvasas)
@@ -171,7 +188,7 @@ begin
 		ld	a,$B0				;	U0,U1,U2,U3
 		ld	($0003),a
 		out	($02),a
-		call	TablaGen			;	17 lap: $EF00-$FFFF
+		call	TablaGen			;	$FE00 zaj, $FF00 szintlap (a paletta $F000-$FDFF: Betolt)
 		;	dekodolo-allapot: hangonkent 10 byte (mutato, var, refdb, visszater, lepes, szelet, PW)
 		ld	hl,DkAll
 		ld	b,30
@@ -195,6 +212,8 @@ begin
 		call	SidResCsend
 		ld	hl,V3SH
 		call	SidResCsend
+		ld	a,30				;	(15 - 0) / 2 x 4 + 2
+		ld	(SidOfs+1),a
 		ld	hl,0
 		ld	(V1ST+1),hl
 		ld	(V2ST+1),hl
@@ -248,27 +267,38 @@ begin
 		xor	a
 		ld	(SidFlag),a
 		;	3 hang dekodolasa: az allapotot a munkateruletre masoljuk, vissza
+		xor	a
+		ld	(DkSzum),a
 		ld	hl,DkAll
 		ld	de,Res
 		call	DkHang
 		ld	hl,DkAll+10
-		ld	de,Res+5
-		call	DkHang
-		ld	hl,DkAll+20
 		ld	de,Res+10
 		call	DkHang
+		ld	hl,DkAll+20
+		ld	de,Res+20
+		call	DkHang
+		ld	a,(DkSzum)			;	DC-kiegyenlites: (15 - szintek) / 2 x 4 + 2 (GR16 modbit)
+		cpl
+		add	a,16
+		and	$FE
+		add	a,a
+		add	a,2
+		ld	(DkSzum),a
 		;	a resek + lepesek atirasa (di/ei)
 		di
 		ld	hl,Res
 		ld	de,V1SH
-		ld	bc,5
+		ld	bc,10
 		ldir
 		ld	de,V2SH
-		ld	bc,5
+		ld	bc,10
 		ldir
 		ld	de,V3SH
-		ld	bc,5
+		ld	bc,10
 		ldir
+		ld	a,(DkSzum)
+		ld	(SidOfs+1),a
 		ld	hl,(DkAll+6)
 		ld	(V1ST+1),hl
 		ld	hl,(DkAll+16)
@@ -357,44 +387,66 @@ begin
 		ldir
 		call	DkLep
 		pop	de
-		;	res-kep: tabla vagy negyszog
+		;	res-kep (10 byte): szelet = tabla (felso 4 bit: 0..13 paletta, 14 zaj, 15 negyszog) + szint (also 4 bit)
 		ld	a,(DkM+8)
-		bit	7,a
-		jr	nz,DkNegy
-		add	a,$EF
-		ex	de,hl
-		ld	(hl),$5F
-		inc	hl
-		ld	(hl),$16
-		inc	hl
+		ld	c,a
+		and	15
+		ld	b,a					;	B = szint
+		ld	hl,DkSzum
+		add	a,(hl)
 		ld	(hl),a
+		ld	a,c
+		ld	hl,KepCsend			;	tabla-kep
+		cp	$F0
+		jr	c,DkT
+		ld	hl,KepNegy
+	DkT:
+		push	de
+		push	bc
+		ld	bc,10
+		ldir
+		pop	bc
+		pop	hl
 		inc	hl
-		ld	(hl),$1A
+		ld	a,c
+		cp	$F0
+		jr	nc,DkN
+		rrca
+		rrca
+		rrca
+		rrca
+		or	$F0					;	lap = $F0 + tabla
 		inc	hl
-		ld	(hl),0
+		ld	(hl),a				;	+2
+		inc	hl
+		inc	hl
+		inc	hl
+		ld	(hl),b				;	+5: or szint
 		jr	DkVissza
-	DkNegy:
-		and	7
-		add	a,a
-		add	a,a
-		ld	b,a
-		ex	de,hl
-		ld	(hl),$FE
-		inc	hl
+	DkN:
 		ld	a,(DkM+9)
-		ld	(hl),a
+		ld	(hl),a				;	+1: cp PW
 		inc	hl
-		ld	(hl),$9F
 		inc	hl
-		ld	(hl),$E6
 		inc	hl
-		ld	(hl),b
+		ld	a,b
+		add	a,a
+		add	a,a
+		ld	(hl),a				;	+4: and szint x 4
 	DkVissza:
 		pop	de
 		ld	hl,DkM
 		ld	bc,10
 		ldir
 		ret
+	;	a res kepei: ld e,a / ld d,$F0+t / ld a,(de) / or szint / ld e,a / ld d,$FF / ld a,(de)
+	;	ill. cp PW / sbc a,a / and szint x 4 / jr +3
+	KepCsend:
+		db	$5F,$16,$F0,$1A,$F6,$00,$5F,$16,$FF,$1A
+	KepNegy:
+		db	$FE,$00,$9F,$E6,$00,$18,$03,$00,$00,$00
+	DkSzum:
+		db	0
 
 	;	munkaterulet: +0 mutato, +2 var, +3 refdb, +4 visszateres, +6 lepes, +8 szelet, +9 PW
 	DkM:
@@ -402,7 +454,7 @@ begin
 	DkAll:
 		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 	Res:
-		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 
 	DkLep:
 		ld	a,(DkM+2)
@@ -493,108 +545,58 @@ begin
 		ret
 
 	TablaGen:
-		ld	hl,$EF00
-		xor	a
-	TgCsend:
+		ld	hl,$FE00			;	zaj: SidZaj x 16
+		ld	de,SidZaj
+	TgZaj:
+		ld	a,(de)
+		add	a,a
+		add	a,a
+		add	a,a
+		add	a,a
 		ld	(hl),a
+		inc	de
 		inc	l
-		jr	nz,TgCsend
-		inc	h					;	$F000
-		ld	c,0					;	alak 0..2
-	TgAlak:
-		ld	de,TgSzint			;	szint 1..5: 16 byte-onkent
-		ld	b,5
-	TgSzintK:
-		push	bc
-	TgByte:
-		;	w = alak(l)
-		ld	a,c
-		or	a
-		jr	nz,TgNemFur
-		ld	a,l					;	fures: i >> 4
+		jr	nz,TgZaj
+		inc	h					;	$FF00: szintlap [ertek x 16 + szint] = (ertek x szint + 7) / 15 x 4
+	TgSz:
+		ld	a,l
+		and	15
+		ld	c,a
+		ld	a,l
 		rrca
 		rrca
 		rrca
 		rrca
 		and	15
-		jr	TgW
-	TgNemFur:
-		dec	a
-		jr	nz,TgZaj
-		ld	a,l					;	haromszog: t = i >> 3; t < 16 ? t : 31 - t
-		rrca
-		rrca
-		rrca
-		and	31
-		cp	16
-		jr	c,TgW
-		cpl
-		add	a,32
-		jr	TgW
-	TgZaj:
-		push	hl
-		ld	a,l
-		ld	hl,SidZaj
-		add	a,l
-		ld	l,a
-		jr	nc,TgZ1
-		inc	h
-	TgZ1:
-		ld	a,(hl)
-		pop	hl
-	TgW:
-		push	de
-		ex	de,hl				;	HL = szinttabla, DE = lap
-		add	a,l
-		ld	l,a
-		jr	nc,TgW1
-		inc	h
-	TgW1:
-		ld	a,(hl)
-		ex	de,hl
-		pop	de
+		ld	b,a
+		inc	b
+		ld	a,7
+	TgMul:
+		dec	b
+		jr	z,TgOszt
+		add	a,c
+		jr	TgMul
+	TgOszt:
+		ld	b,0
+	TgO1:
+		sub	15
+		jr	c,TgO2
+		inc	b
+		jr	TgO1
+	TgO2:
+		ld	a,b
+		add	a,a
+		add	a,a
 		ld	(hl),a
 		inc	l
-		jr	nz,TgByte
-		inc	h					;	kovetkezo lap
-		ld	a,e
-		add	a,16
-		ld	e,a
-		jr	nc,TgW2
-		inc	d
-	TgW2:
-		pop	bc
-		djnz	TgSzintK
-		inc	c
-		ld	a,c
-		cp	3
-		jr	nz,TgAlak
-		;	keveres ($FF00)
-	TgKev:
-		ld	a,l
-		and	$FC
-		or	2					;	GR16 modbit (a port 6 bit 0-1 = videomod)
-		ld	(hl),a
-		inc	l
-		jr	nz,TgKev
+		jr	nz,TgSz
 		ret
-	TgSzint:
-		db	0,0,0,0,0,0,0,0,4,4,4,4,4,4,4,4
-		db	0,0,0,0,4,4,4,4,4,4,4,4,8,8,8,8
-		db	0,0,0,4,4,4,4,4,8,8,8,8,8,12,12,12
-		db	0,0,4,4,4,4,8,8,8,8,12,12,12,12,16,16
-		db	0,0,4,4,4,8,8,8,12,12,12,16,16,16,20,20
 
-	SidResCsend:
-		ld	(hl),$5F
-		inc	hl
-		ld	(hl),$16
-		inc	hl
-		ld	(hl),$EF
-		inc	hl
-		ld	(hl),$1A
-		inc	hl
-		ld	(hl),0
+	SidResCsend:				;	HL = a res: csend (0. tabla, szint 0)
+		ex	de,hl
+		ld	hl,KepCsend
+		ld	bc,10
+		ldir
 		ret
 
 	SidFlag:
@@ -610,20 +612,14 @@ begin
 		add	ix,de
 		ld	a,ixh
 	V1SH:
-		ld	e,a
-		ld	d,$EF
-		ld	a,(de)
-		nop
+		db	$5F,$16,$F0,$1A,$F6,$00,$5F,$16,$FF,$1A	;	res (10 byte, a DkHang irja): lasd KepCsend / KepNegy
 		ld	b,a
 	V2ST:
 		ld	de,0
 		add	iy,de
 		ld	a,iyh
 	V2SH:
-		ld	e,a
-		ld	d,$EF
-		ld	a,(de)
-		nop
+		db	$5F,$16,$F0,$1A,$F6,$00,$5F,$16,$FF,$1A	;	res (10 byte, a DkHang irja): lasd KepCsend / KepNegy
 		add	a,b
 		ld	b,a
 	V3ST:
@@ -631,14 +627,10 @@ begin
 		add	hl,de
 		ld	a,h
 	V3SH:
-		ld	e,a
-		ld	d,$EF
-		ld	a,(de)
-		nop
+		db	$5F,$16,$F0,$1A,$F6,$00,$5F,$16,$FF,$1A	;	res (10 byte, a DkHang irja): lasd KepCsend / KepNegy
 		add	a,b
-		ld	e,a
-		ld	d,$FF			;	keverolap ($EF + 16)
-		ld	a,(de)
+	SidOfs:
+		add	a,30			;	DC-kiegyenlites + GR16 modbit (kepkockankent irja a fo hurok)
 		out	($06),a
 		dec	c
 		jr	z,SidKep
@@ -1763,11 +1755,9 @@ begin
 		ld	bc,2
 		rst	$30
 		db	$D2
-		ld	hl,($6F60)
-		ld	a,h
-		and	l
+		ld	a,($6F61)			;	$FFFF (1.1) / $FFFE (1.2): van info; 1.0-nal a hossz felso byte-ja < $FF
 		inc	a
-		jr	nz,IoZar			;	1.0-s fajl: nincs info
+		jr	nz,IoZar
 		ld	de,$6F00
 		ld	bc,96
 		rst	$30
@@ -1872,7 +1862,8 @@ begin
 	JtHiba := Hiba;
 	Olvas();
 	Rajz();
-	if (JtHiba <> 0) then Allapot("Hiba a betöltéskor!");
+	if (JtHiba = 2) then Allapot("Régi .STC - az új sid2tvc kell!")
+	else if (JtHiba <> 0) then Allapot("Hiba a betöltéskor!");
 end;
 
 

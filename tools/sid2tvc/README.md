@@ -29,8 +29,6 @@ sid2tvc [-s N | -a] [-o MAPPA] [-n NÉV] [-w] [-f N] [-m] [-q] fajl.sid
   -f N      hurok nélkül legfeljebb N képkocka (50/mp; alapértelmezés 30000 = 10 perc)
   -m        csak a memória-hurok (a hang ismétlődését nem keresi)
   -q        csak a hibákat írja ki
-  -U        KÍSÉRLETI (csak WAV, a .STC nem változik): B = a mostani hang, C = hangszínpaletta,
-            D = paletta + okos hangerő-elosztás; -t MP a hossz (60), -P N a paletta mérete (15 + zaj)
 ```
 
 Példa: `sid2tvc -a -w Last_Ninja.sid` → `SID_TVC/LASTNINJ/SONG1.STC ... SONG11.STC` (+ WAV).
@@ -50,22 +48,28 @@ A `SID_TVC` mappát változatlan szerkezetben kell a TVC lemezére / SD-kártyá
   A kettőből a rövidebb dal nyer (a kiírásban `[memoria]` / `[hang]`). Hurok nélkül 10 perc, aztán elölről;
   ha a hurok csak 10 perc után jön, és úgy nem fér el, szintén 10 perc.
 - **SID-burkoló (ADSR)** a valódi SID-időzítésekkel; hullámforma, impulzusszélesség, hangerő.
-- **Tömörítés** hangonként (ismétlődő részek visszahivatkozással); a kész dal legfeljebb 52 224 bájt ($2300-$EEFF) lehet.
+- **Hangszínpaletta (1.2):** a PC hangonként, képkockánként kiszámolja a SID valódi hangjának egy ciklusát (szűrő a
+  6581-es görbével, kevert hullámformák, gyűrűmoduláció és szinkron közelítve), és dalonként 14 táblát választ
+  (súlyozott k-közép a felharmonikus-spektrumon); + zaj; a tiszta, szűretlen négyszög PW-összehasonlítás marad.
+- **Hangerő (1.2):** hangonként 16 szint; a DAC 15 szintje dalonként állandó erősítéssel (a hangos képkockák
+  99. percentilise = 15), hiszterézissel (kevesebb változás = kisebb fájl); DC-kiegyenlítés a TVC-n.
+- **Tömörítés** hangonként (ismétlődő részek visszahivatkozással); a kész dal legfeljebb 52 480 bájt ($2300-$EFFF) lehet.
 - Minden kimenetet visszaellenőriz a TVC lejátszójának pontos mására.
 
-Nem kezeli (egyelőre): többszörös sebességű (CIA-val gyorsított) dalok, digi-hangok, a SID szűrője.
+Nem kezeli (egyelőre): többszörös sebességű (CIA-val gyorsított) dalok, digi-hangok.
+A 2,5 kHz feletti hangokat a TVC (5008 Hz-es mintavétel) nem tudja tisztán lejátszani.
 
 ## A .STC formátum
 
-**1.1 (2026-11-01):** `$FF $FF`, aztán 3 × 32 bájt info a .sid fejlécéből: cím, szerző, kiadás (31 jel + 0; ami a
-TVC-s fontban nincs, az szóköz). Utána ugyanaz, mint az 1.0-ban: 2 bájt hossz (L), a dal `$C000` feletti része, végül a
-`$2300..$BFFF` rész (így a TVC ROM-jával egyszerűen betölthető). Az 1.0-s fájl az L-lel kezdődik (L sosem `$FFFF`), a
-SIDSoftEMU mindkettőt lejátssza; az infót (cím, szerző, kiadás) lejátszás közben kiírja. A dal `$2300`-tól: 6 bájtos fejléc (a 3 hang folyamának címe), majd hangonként
-képkockánként egy rekord:
+**1.2 (2026-11-01):** `$FE $FF`, aztán 3 × 32 bájt info a .sid fejlécéből: cím, szerző, kiadás (31 jel + 0; ami a
+TVC-s fontban nincs, az szóköz), 14 × 256 bájt paletta (érték × 16; a TVC-n `$F000-$FDFF`), 2 bájt hossz (L), a dal
+`$C000` feletti része, végül a `$2300..$BFFF` rész (így a TVC ROM-jával egyszerűen betölthető). A régi 1.1-es
+(`$FF $FF` + info) és 1.0-s (rögtön L) fájlt a SIDSoftEMU már nem játssza le („Régi .STC”). A dal `$2300`-tól:
+6 bájtos fejléc (a 3 hang folyamának címe), majd hangonként képkockánként egy rekord:
 
 | Kód | Jelentés |
 |---|---|
-| `$00..$0F` | bit 0: lépésköz (2 bájt); bit 1: lépésköz += előjeles bájt; bit 2: szelet (1 bájt: `<$80` táblalap 0..15, `>=$80` négyszög, szint = alsó 3 bit); bit 3: PW (1 bájt) |
+| `$00..$0F` | bit 0: lépésköz (2 bájt); bit 1: lépésköz += előjeles bájt; bit 2: szelet (1 bájt: felső 4 bit tábla - 0..13 paletta, 14 zaj, 15 négyszög -, alsó 4 bit szint 0..15); bit 3: PW (1 bájt) |
 | `$80+n` | n képkocka változás nélkül |
 | `$10 lo hi n` | REF: n rekord lejátszása a lo/hi címről |
 | `$11 lo hi` | ugrás (hurok) |
