@@ -64,7 +64,7 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   (lépés, szelet, PW) -> hangonként külön, visszahivatkozásos (REF) folyam -> `dalok/DALnn.BIN` + pontos WAV
   `hang_minta/Last_Ninja_<n>_tvc.wav`. Formátum a `sid2tvc.py` fejében.
 - **A felhasználó döntése: a dalok lemezfájlból töltődnek** (aldalanként egy fájl), nem a programba fordítva.
-- TVC (`SIDSoftEMU.ras`, a régi 4 változatos teszt: git `2f353c6:SIDSoftEMU.ras.bak_teszt4`): menü ROM-mal (1-9, 0=10, A=11) -> betöltés
+- TVC (`SIDSoftEMU.ras`, a régi 4 változatos teszt: git `b6ad113:SIDSoftEMU.ras.bak_teszt4`): menü ROM-mal (1-9, 0=10, A=11) -> betöltés
   (Lemmings-sorrend; a $C000 feletti rész előbb $8000-ra, onnan U3-ba) -> lejátszás **$B0 lapozással (teljes 64K
   RAM)**, dal $4000-tól (max 44800 B), táblák $EF00-$FFFF; bármely gomb = vissza a ROM-nak ($38 = F5 3E 70,
   port 5, CRTC R10/R11 = 3) és a menübe. Dekódoló asm-ben: zöld sáv ~2-3%.
@@ -137,4 +137,5 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
 - WAV-ok a Macen: `python3 tools/sid_modell.py` (0-4), `python3 tools/sid_tvc_adat.py` (6-9 = a 4 változat pontos modellje).
 - Folytatás (ha visszatérünk): lejátszó asm-be (12% -> 2-3%); táblák generálása induláskor (a program kisebb);
   PC-s .sid -> regiszterdump -> TVC dal formátum (siddump/cRSID); ADSR a SID valódi időzítéseivel.
-- **GitHub-repó NEM kell (a felhasználó döntése, 2026-10-31)** - csak helyi git, ne hozd létre, ne kérdezd.
+- **GitHub-repó KELL (a felhasználó kérése, 2026-11-01):** https://github.com/LaM3rzLG/SIDSoftEMU (privát). A commitok a
+  felhasználó nevében: `LaM3rzLG <lorinczg77@gmail.com>` (repo-szintű git config; a régi commitok is átírva). Munka végén push.
