@@ -17,11 +17,13 @@ program FajlTeszt16;
 var
 	Font16_Data	:	incbin("resources/font16_kek_cian.bin");
 	Logo_Data	:	incbin("resources/images/C64_logo_forog.bin");	/* maszkolt GE sprite, 6 byte x 17 sor, 16 fazis */
-	Logo		:	GE::Sprite;
+	LogoPtr, LogoCim	:	integer = 0;	/* a megszakitas allapota: a kovetkezo fazis, a kepernyocim */
+	LogoSzaml, LogoKesl	:	byte = 1;
 	const LOGO_X		: byte = 57;	/* jobb felso sarok (byte) */
 	const LOGO_Y		: byte = 3;
 	const LOGO_FAZIS	: byte = 16;
 	const LOGO_KESL		: byte = 3;		/* kepkocka / fazis (a sprite-szerkeszto "speed" erteke) */
+	const LOGO_MERET	: integer = 3267;	/* a .bin merete: 3 + 16 fazis x 17 sor x 6 x (maszk, adat) */
 
 	const LATHATO	: byte = 14;		/* ennyi listasor latszik */
 	const LISTA_Y	: byte = 27;		/* az elso listasor kepsora */
@@ -385,6 +387,93 @@ SavVege:
 end;
 
 
+/* ---------------------------------------------------------------- FORGO LOGO MEGSZAKITASBOL
+   A $38-as cimre JP LogoIT kerul (mint a GE::DisableTVCITHandler-nel a GE_IT_HANLDER). A megszakitas LogoKesl
+   kepkockankent kirajzolja a kovetkezo fazist: a hatter fix fekete, ezert maszk nelkul eleg az adat-byte-okat
+   ramasolni (az atlatszo pont adata 0 = fekete). VID mindig be van lapozva (GE::MEM_VID_ON); a FISH-hivas alatt
+   a firmware IT-je fut (GE::EnableTVCITHandler), ott a logo par kepkockara megall. */
+procedure LogoITBe();
+begin
+	asm("
+		di
+		ld	hl,$38
+		ld	(hl),$C3
+		inc	hl
+		ld	de,LogoIT
+		ld	(hl),e
+		inc	hl
+		ld	(hl),d
+		ei
+		jp	LogoITVege
+LogoIT:
+		push	af
+		push	bc
+		push	de
+		push	hl
+		ld	a,[LogoSzaml]
+		dec	a
+		jr	nz,LogoITKi
+		ld	hl,[LogoPtr]
+		ld	de,[LogoCim]
+		ld	c,17
+LogoITSor:
+		ld	b,6
+LogoITByte:
+		inc	hl
+		ld	a,(hl)
+		ld	(de),a
+		inc	hl
+		inc	de
+		djnz	LogoITByte
+		ld	a,e
+		add	a,58
+		ld	e,a
+		jr	nc,LogoITNc
+		inc	d
+LogoITNc:
+		dec	c
+		jr	nz,LogoITSor
+		ld	de,Logo_Data+3267
+		or	a
+		sbc	hl,de
+		add	hl,de
+		jr	nz,LogoITTovabb
+		ld	hl,Logo_Data+3
+LogoITTovabb:
+		ld	[LogoPtr],hl
+		ld	a,[LogoKesl]
+LogoITKi:
+		ld	[LogoSzaml],a
+		pop	hl
+		pop	de
+		pop	bc
+		pop	af
+		out	($07),a
+		ei
+		ret
+LogoITVege:
+	");
+end;
+
+
+/* a logo allapota (egyszer, a GE::Init utan), majd a megszakitas bekapcsolasa */
+procedure LogoIndit();
+begin
+	LogoPtr := #Logo_Data + 3;
+	LogoCim := LOGO_Y;
+	LogoCim := LogoCim * 64 + LOGO_X;
+	asm("
+		ld	hl,[LogoCim]
+		ld	de,[GE_ScreenAddr]
+		add	hl,de
+		ld	[LogoCim],hl
+	");
+	LogoKesl := LOGO_KESL;
+	LogoSzaml := 1;
+	LogoITBe();
+end;
+
+
 /* ---------------------------------------------------------------- az egyetlen asm: FISH-hivas
    C = FishKod (04H elso / 05H kovetkezo keresese), DE -> FPB {IX = 0, HL = ut, DE = MintaFcb, BC = TalaltFcb};
    eredmeny: FishHiba (0 = van bejegyzes). A hivas a $70-es lapozassal megy (mint a SIDSoftEMU-ban). */
@@ -632,7 +721,7 @@ begin
 		else FishHivas();
 	end;
 	HibaKod := FishHiba;
-	GE::DisableTVCITHandler();
+	LogoITBe();		/* a GE::DisableTVCITHandler helyett: a sajat megszakitas (logo) */
 	Sel := 0;
 	Top := 0;
 end;
@@ -700,21 +789,10 @@ begin
 end;
 
 
-/* a forgo logo rajzolasa: hatter vissza (LastPosition) -> Draw (menti a hatteret, rajzol) -> UpdateLastPos (Ugh-minta) */
-procedure LogoRajz();
-begin
-	Logo.RestoreBackground();
-	Logo.SetPosition();
-	Logo.Draw();
-	Logo.UpdateLastPos();
-end;
-
-
 procedure UjKonyvtar();
 begin
 	Olvas();
 	Rajz();
-	LogoRajz();		/* a Rajz torolte a kepet; a hatterpuffer is fekete, igy a visszaallitas nem art */
 end;
 
 
@@ -826,23 +904,13 @@ begin
 	Ut[1] := 0;
 	UtHossz := 1;
 	GE::ClearScreen(GE::GR16_COLOR_BLACK);
-	Logo.Init(#Logo_Data, LOGO_X, LOGO_Y, True);	/* True: hatterpuffer (fekete) */
-	Logo.InitAnimation(LOGO_FAZIS, LOGO_KESL, GE::LOOP_FORWARD);
-	Logo.SetPosition();
-	Logo.Draw();
-	Logo.UpdateLastPos();
+	LogoIndit();
 	UjKonyvtar();
 
 	ElozoGomb := 0;
 	while (true) do
 	begin
 		GE::WaitForSync();
-		Logo.Animation();
-		if (Logo.WasAnimated) then
-		begin
-			Logo.WasAnimated := False;	/* a GE nem torli magatol */
-			LogoRajz();
-		end;
 		GE::GetKeyboard();
 		Gomb := 0;
 		if (GE::Pressed(GE::JOY1_UP)) then Gomb := 1;

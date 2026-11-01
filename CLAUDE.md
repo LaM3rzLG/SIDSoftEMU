@@ -93,9 +93,11 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   pontjai sosem változnak (az OR-os változat elszínezte a 8/10-es pontokat - a felhasználó "csúnya"-nak ítélte). Lapozás: azonnal.
   Font most: `resources/font16_kek_cian.bin` (cián + sötétkék árnyék; forrás TVC_Kozos/tools/Fontok). A sáv színe `SAV_SZIN`
   (most sötétlila), olyan szín kell, ami NINCS a fontban (ez a font: 0,1,5,8,9,10,13).
-  Forgó C64-logó a jobb felső sarokban (x 57, y 3): `resources/images/C64_logo_forog.bin` (maszkolt GE sprite 6x17, 16 fázis,
-  a felhasználó rajza; .json = sprite-szerkesztő projekt, .bmp-k = fázisok), GE::Sprite + InitAnimation(16, 3, LOOP_FORWARD);
-  fázisváltáskor RestoreBackground -> SetPosition -> Draw -> UpdateLastPos (Ugh-minta); könyvtárváltás után újrarajzolva.
+  Forgó C64-logó a jobb felső sarokban (x 57, y 3), **MEGSZAKÍTÁSBÓL** (a felhasználó kérése: nem állhat le): `LogoITBe` a $38-ra
+  JP LogoIT-t ír (a GE::DisableTVCITHandler helyett, az Olvas végén is), 3 képkockánként a következő fázis adat-byte-jai a képre
+  (fix fekete háttér -> maszk nem kell). Csúszás, könyvtárváltás közben is forog (a FISH alatt a firmware IT fut, ~1 fázis).
+  Adat: `resources/images/C64_logo_forog.bin` (maszkolt GE sprite 6x17, 16 fázis) = `python3 tools/bmp2ge.py resources/images
+  resources/images/C64_logo_forog.bin` a `c64_symbol_1..16.bmp`-kből (a felhasználó a BMP-ket frissíti).
 - Folytatási ötletek: hangminőség (szűrő közelítése táblával, finomabb szintek/keverés, zaj), 5. aldal
   tömörítése, más .sid-ek kipróbálása, dal neve a fájlból a menüben.
 
