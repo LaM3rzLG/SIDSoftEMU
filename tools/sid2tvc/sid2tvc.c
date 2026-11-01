@@ -946,7 +946,7 @@ static int wav_ir(const char *path, const All *T, int nfr)
 #endif
 #define UJ_M 1024                       /* egy ciklus mintai a spektrumhoz */
 #define PAL_MAX 16
-static int uj_wav = 0, uj_sec = 60, pal_n = 15;
+static int uj_wav = 0, uj_sec = 60, pal_n = 15, savkorlat = 1;   /* -K: savkorlat = 0 (fenyes, mint most) */
 static const double TVC_FS = 3125000.0 / 16 / 39;
 
 typedef struct { uint8_t q[256]; double p; float ft[24]; double w; int pal; } Alak;
@@ -1041,7 +1041,7 @@ static int alak_keres(int wave, int ring, int sync, int F, int Fs, int fb, int p
     fft(re, im, UJ_M);
     fbhz = fb * PAL_CLK / 16777216.0;
     fmax = TVC_FS * 0.5;
-    K = (int)(fmax / (fbhz > 1 ? fbhz : 1));
+    K = savkorlat ? (int)(fmax / (fbhz > 1 ? fbhz : 1)) : 120;
     if (K > 120) K = 120;
     for (i = 0; i < 256; i++) s[i] = 0;
     for (k = 1; k <= K; k++) {
@@ -1290,7 +1290,8 @@ static void uj_hang(const Dump *dp, const All *T, const char *mappa, int song, i
                 port[pi++] = (uint8_t)(tot > 15 ? 15 : tot);
             }
         }
-        snprintf(fajl, sizeof(fajl), "%s/SONG%d_%s.WAV", mappa, song, var ? "D_hangero" : "C_paletta");
+        snprintf(fajl, sizeof(fajl), "%s/SONG%d_%s.WAV", mappa, song,
+                 savkorlat ? (var ? "D_hangero" : "C_paletta") : (var ? "E_fenyes" : "C_fenyes"));
         if (port_wav(fajl, port, pi)) info("  WAV: %s\n", fajl);
     }
     /* B = a mostani TVC-hang ugyanilyen hosszan */
@@ -1475,6 +1476,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-w")) wav = 1;
         else if (!strcmp(argv[i], "-m")) csak_mem = 1;
         else if (!strcmp(argv[i], "-U")) uj_wav = 1;
+        else if (!strcmp(argv[i], "-K")) savkorlat = 0;
         else if (!strcmp(argv[i], "-t") && i + 1 < argc) uj_sec = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-P") && i + 1 < argc) { pal_n = atoi(argv[++i]); if (pal_n < 1) pal_n = 1; if (pal_n > PAL_MAX) pal_n = PAL_MAX; }
         else if (!strcmp(argv[i], "-f") && i + 1 < argc) maxf = atoi(argv[++i]);
