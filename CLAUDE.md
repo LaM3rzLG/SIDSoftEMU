@@ -71,6 +71,13 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   ESC, könyvtárváltás, logó forog lejátszás után. Lejátszás alatt a logó áll (a hang-IT fut). Windows: a build.ps1-ben
   nincs memória-ellenőrzés.
 
+## Kilépés (2026-11-01, freeTVC headless-ben kipróbálva)
+ESC a gyökérben -> `Kilepes`: doboz középen „Biztosan kilépsz?” I/N (a felhasználó kérése). N = `Rajz()`. I = elengedésre
+vár, `GE::EnableTVCITHandler`, $70 lapozás, a BASIC IX/IY/második regiszterkészlete vissza (`IndMent` a főprogram elején:
+`IndSP` ...), `GE::SetGraphics(GRAPHICS4)` (ROM VMODE), `ld sp,(IndSP) / ret` -> a „10 PRINT USR(6659)” kiír egy számot
+(pl. 85), aztán `ok`. A szövegek asm `db`-ben (a TRSE a "..." konstansokat a rezidens részbe tenné: +48 B, túlcsordult);
+asm-ben a `p` változónév nem használható (feltételkód).
+
 ## NanoSD (2026-11-01, freeTVC-ben kipróbálva: lista, LN1/5 és LN2/10 bájtra, info; a lemezes mód is megy)
 - Indításkor `NsKeres`: a 4 foglalat IOMEM-jében ($C000, port 2 = $D0, port 3 bit 6-7 = foglalat) a „MOPS 6 NANOSD” fejléc
   -> `NsPort` = $10 × (foglalat+1), `Eszkoz` = 1. Ekkor a lista a Nano saját parancsaival: CHDIR (02h, út `/`-rel, 00h) ->

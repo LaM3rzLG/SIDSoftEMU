@@ -1911,6 +1911,83 @@ begin
 end;
 
 
+/* ---------------------------------------------------------------- kilepes (ESC a gyokerben): kerdes kozepen, I / N.
+   Igen: rendszer-IT vissza, $70 lapozas, a BASIC regiszterei (IX, IY, a masodik keszlet) vissza, Graphics 4 (ROM),
+   aztan RET a BASIC vermevel (a program a "10 PRINT USR(6659)"-bol indult; IndMent a foprogram elejen). */
+procedure Kozepre(yy : byte; szoveg : ^byte);
+begin
+	Ir16_Hossza(szoveg);
+	Ir16(32 - Ir16_Hossz / 2, yy, szoveg);
+end;
+
+procedure Kilepes();
+begin
+	GE::FillRect(12, 92, 40, 52, GE::GR16_COLOR_DARKBLUE);	/* keret */
+	GE::FillRect(13, 94, 38, 48, GE::GR16_COLOR_BLACK);
+	/* a szovegek itt, a nem rezidens kodban (a TRSE a "..." konstansokat a program elejere, a rezidens reszbe tenne) */
+	asm("
+		ld	hl,KlSz1
+		ld	(Ir16_Szoveg),hl
+		jr	KlTovabb
+	KlSz1:
+		db	$42,$69,$7A,$74,$6F,$73,$61,$6E,$20,$6B,$69,$6C,$E9,$70,$73,$7A,$3F,0	;	Biztosan kilepsz?
+	KlSz2:
+		db	$49,$20,$3D,$20,$49,$67,$65,$6E,$20,$20,$20,$20,$4E,$20,$3D,$20,$4E,$65,$6D,0	;	I = Igen, N = Nem
+	KlTovabb:
+	");
+	Kozepre(102, Ir16_Szoveg);
+	asm("
+		ld	hl,KlSz2
+		ld	(Ir16_Szoveg),hl
+	");
+	Kozepre(122, Ir16_Szoveg);
+	k := 0;
+	while (k = 0) do
+	begin
+		GE::WaitForSync();
+		GE::GetKeyboard();
+		if (GE::Pressed(GE::KEY_I)) then k := 1;
+		if (GE::Pressed(GE::KEY_N)) then k := 2;
+	end;
+	while (GE::Pressed(GE::KEY_I) or GE::Pressed(GE::KEY_N)) do	/* elengedesre var (a BASIC ne kapja meg) */
+	begin
+		GE::WaitForSync();
+		GE::GetKeyboard();
+	end;
+	if (k = 2) then
+	begin
+		Rajz();
+		return;
+	end;
+	GE::EnableTVCITHandler();				/* a logo-IT helyett a rendszer-IT */
+	asm("
+		ld	a,$70					;	U0, U1, U2, SYS (a BASIC lapozasa)
+		ld	($0003),a
+		out	($02),a
+		call	IndVissza
+	");
+	GE::SetGraphics(GE::GRAPHICS4);			/* ROM: mod, kepernyotorles, szovegkiiro */
+	asm("
+		call	IndVissza
+		ld	sp,(IndSP)
+		ret							;	vissza a BASIC-be
+	IndVissza:
+		ld	ix,(IndIX)
+		ld	iy,(IndIY)
+		ld	hl,(IndAF2)
+		push	hl
+		ex	af,af'
+		pop	af
+		ex	af,af'
+		exx
+		ld	hl,(IndHL2)
+		ld	de,(IndDE2)
+		ld	bc,(IndBC2)
+		exx
+		ret
+	");
+end;
+
 procedure Vegrehajt();
 begin
 	if (Gomb = 1) then
@@ -1942,12 +2019,47 @@ begin
 		end;
 	end;
 	if (Gomb = 5) then Enter();
-	if (Gomb = 6) then Szulo();
+	if (Gomb = 6) then
+	begin
+		if (UtHossz > 1) then Szulo()
+		else Kilepes();
+	end;
 end;
 
 
 /* ---------------------------------------------------------------- foprogram */
 begin
+	asm("
+		ld	(IndSP),sp				;	a BASIC allapota a kilepeshez (Kilepes)
+		ld	(IndIX),ix
+		ld	(IndIY),iy
+		exx
+		ld	(IndHL2),hl
+		ld	(IndDE2),de
+		ld	(IndBC2),bc
+		exx
+		ex	af,af'
+		push	af
+		pop	hl
+		ld	(IndAF2),hl
+		ex	af,af'
+		jr	IndTovabb
+	IndSP:
+		dw	0
+	IndIX:
+		dw	0
+	IndIY:
+		dw	0
+	IndHL2:
+		dw	0
+	IndDE2:
+		dw	0
+	IndBC2:
+		dw	0
+	IndAF2:
+		dw	0
+	IndTovabb:
+	");
 	Hiba := 0;
 	if (Hiba = 77) then					/* sosem igaz: csak hogy a TRSE ne dobja ki az asm-bol hivott eljarasokat */
 	begin
