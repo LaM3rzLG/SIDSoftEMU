@@ -39,7 +39,8 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   `DalJatszas`, elengedésre vár, `SetMemory($50)`, lista újra (a kijelölés marad), logó-IT vissza.
 - Memória: rezidens vége `RezVege` $229F (< $2300, 97 B tartalék!); kód vége $3115 (< $5000); font $5000, logó $6180
   (`incbin(fájl, cím)` - asm-ben az incbin relatív útja nem működik); lista $7000. Lejátszás alatt a VID $8A00-tól: kód +
-  font/logó (11 449 B, max 12 800), R6 = 10 (felső 40 pontsor: cím, út, „Szól: név”). A `build_mac.sh` ellenőrzi a határokat.
+  font/logó (~11,5 KB, max 12 800), R6 = 6: csak a felső 24 pontsor látszik = a fájl neve, a könyvtára, jobbra a logó 0. fázisa
+  (a felhasználó kérése). A keret fekete: a mérés (IT piros, lejátszó zöld) kivéve (2026-11-01). A `build_mac.sh` ellenőrzi a határokat.
 - Kipróbálva freeTVC-ben (VT-DOS 1.2): LN1/1 és LN1/5 (47 KB, bájtra egyezik a memóriában), LN3/1, vissza a listába,
   ESC, könyvtárváltás, logó forog lejátszás után. Lejátszás alatt a logó áll (a hang-IT fut). Windows: a build.ps1-ben
   nincs memória-ellenőrzés.

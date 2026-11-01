@@ -12,7 +12,7 @@ program SIDSoftEMU;
    - Lejatszas: teljes 64K RAM ($B0), tablak $EF00-$FFFF (TablaGen), dal $2300-tol (max 52 224 B). Sajat hang-IT a
      $38-on; kilepeskor a rendszer-IT visszaall, majd a fajlkezelo a sajat (logo) IT-jet teszi vissza.
    - Hang-IT: 3 fazisszamlalo IX, IY, HL'. Hangonkent 5 byte-os onmodosito res. A port 6-ra a GR16 modbit (2) megy.
-   - Meres a keretben: IT = PIROS, lejatszo = ZOLD, szabad = FEKETE.
+   - A keret fekete (a korabbi meres - IT piros, lejatszo zold - a felhasznalo kerese szerint kiveve, 2026-11-01).
    TILOS a fo programban lejatszas kozben: IX, IY, shadow regiszterek, ROM-hivas.
    MEMORIA: a REZIDENS resz (valtozok, GE unit, Betolt, Lejatszas, DalJatszas) vege = RezVege < $2300 kell (.sym)!
    Lejatszas alatt a VID-ben var ($8A00-tol, max $BC00-ig = 12 800 byte): 1. RezVege..EndBlock19ef (a kod), 2. a font +
@@ -221,18 +221,12 @@ begin
 
 		;	--- fo hurok: kepkockankent
 	LjKor:
-		xor	a
-		ld	(SidKeret),a
-		out	($00),a
 	LjVar:
 		ld	a,(SidFlag)
 		or	a
 		jr	z,LjVar
 		xor	a
 		ld	(SidFlag),a
-		ld	a,160			;	keret: zold = lejatszo
-		ld	(SidKeret),a
-		out	($00),a
 		;	3 hang dekodolasa: az allapotot a munkateruletre masoljuk, vissza
 		ld	hl,DkAll
 		ld	de,Res
@@ -585,16 +579,12 @@ begin
 
 	SidFlag:
 		db	0
-	SidKeret:
-		db	0
 
 	;	------------------------------------------------ A HANG-IT
 	SidIT:
 		ex	af,af'
 		exx
 		out	($07),a
-		ld	a,136			;	keret: piros (meres)
-		out	($00),a
 	V1ST:
 		ld	de,0
 		add	ix,de
@@ -633,8 +623,6 @@ begin
 		dec	c
 		jr	z,SidKep
 	SidVege:
-		ld	a,(SidKeret)
-		out	($00),a
 		exx
 		ex	af,af'
 		ei
@@ -650,14 +638,14 @@ end;
 /* ---------------------------------------------------------------- dal lejatszasa (REZIDENS: a RezVege elott kell lennie)
    A dal $2300-tol tolt, ez felulirja a program felso reszet (RezVege-tol a program vegeig: fajlkezelo, font, logo,
    foprogram). Ezert elotte ezt a reszt a kepmemoriaba (VID $0A00-tol = $8A00, $50 lapozassal) mentjuk; a kepbol
-   addig csak a felso 40 pontsor latszik (CRTC R6 = 10). A vegen vissza, a kep alja ($8A00-$BBFF) fekete, R6 = 60.
+   addig csak a felso 24 pontsor latszik (CRTC R6 = 6: nev, konyvtar, a logo 0. fazisa). A vegen vissza, a kep alja ($8A00-$BBFF) fekete, R6 = 60.
    A font + logo ($5000-tol) a kod utan mentodik. A betolteshez $70 lapozas kell (a $C000 feletti resz a $8000-ra = U2 jon). A fajlnev: FkFajl (hossz + ut). */
 procedure DalJatszas();
 begin
 	asm("
-		ld	a,6					;	CRTC R6: csak a felso 40 pontsor latszik (a mentes helye nem)
+		ld	a,6					;	CRTC R6: csak a felso 24 pontsor latszik (a mentes helye nem)
 		out	($70),a
-		ld	a,10
+		ld	a,6
 		out	($71),a
 		call	DjMent
 		ld	a,$70				;	U0,U1,U2,SYS
@@ -1090,6 +1078,10 @@ LogoIT:
 		jr	nz,LogoITKi
 		ld	hl,[LogoPtr]
 		ld	de,[LogoCim]
+		call	LogoRajzol
+		jr	LogoITUtan
+; egy fazis kirajzolasa: HL = a fazis (maszk, adat parok), DE = kepernyocim; vissza: HL = a kovetkezo fazis
+LogoRajzol:
 		ld	c,17
 LogoITSor:
 		ld	b,6
@@ -1108,6 +1100,8 @@ LogoITByte:
 LogoITNc:
 		dec	c
 		jr	nz,LogoITSor
+		ret
+LogoITUtan:
 		ld	de,Logo_Data+3267
 		or	a
 		sbc	hl,de
@@ -1127,6 +1121,17 @@ LogoITKi:
 		ei
 		ret
 LogoITVege:
+	");
+end;
+
+
+/* a logo 0. fazisa (lejatszaskor, allokep; a logo-IT ilyenkor nem fut) */
+procedure LogoFazis0();
+begin
+	asm("
+		ld	hl,Logo_Data+3
+		ld	de,[LogoCim]
+		call	LogoRajzol
 	");
 end;
 
@@ -1518,11 +1523,22 @@ begin
 		j := j + 1;
 	end;
 	FkFajl[0] := k - 1;
-	/* lejatszas alatt csak a felso 40 pontsor latszik */
-	GE::FillRect(0, 25, 64, 15, 0);
-	Ir16(2, 28, "Szól: ");
-	Ir16(Ir16_X, 28, #Nev);
-	GE::EnableTVCITHandler();
+	/* lejatszas alatt csak a felso 24 pontsor latszik: a fajl neve, a konyvtara, jobbra a logo 0. fazisa */
+	GE::EnableTVCITHandler();		/* a logo-IT itt all le (a betolteshez a firmware IT kell) */
+	GE::FillRect(0, 0, 64, 24, 0);
+	LogoFazis0();
+	Ir16(2, 2, #Nev);
+	k := 0;							/* a konyvtar = az ut utolso tagja */
+	j := 0;
+	while (j < UtHossz) do
+	begin
+		if (Ut[j] = 92) then k := j + 1;
+		j := j + 1;
+	end;
+	if (k >= UtHossz) then k := 0;	/* gyoker: \ */
+	p := #Ut;
+	p := p + k;
+	Ir16(2, 13, p);
 	DalJatszas();
 	asm("
 	JtElenged:
