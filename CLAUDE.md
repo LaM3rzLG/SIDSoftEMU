@@ -71,6 +71,15 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   ESC, könyvtárváltás, logó forog lejátszás után. Lejátszás alatt a logó áll (a hang-IT fut). Windows: a build.ps1-ben
   nincs memória-ellenőrzés.
 
+## Keret-sáv lejátszás közben (2026-11-02, freeTVC-ben kipróbálva; a felhasználó: „a szöveg alatt, max 50 pixel”)
+A hang-IT a kimenet színét (`$EF00` tábla, a középszinttől való eltérés: fekete…fehér) a keretre írja, de csak a
+képkocka első 16 IT-jében (C' = 100..85) = a 47. sor alatti ~50 pontsor; máskor fekete. Ehhez: lejátszás közben
+**R5 = 0** (312 sor = 62 400 T = pontosan 100 hang-IT), indításkor `KsSync` ($EF40, a Jatszik másolja oda): kurzor-IT
+a 47. sor végére (R14/R15 = $02FF), arra vár, INSTART (`in a,($5B)`), hang-IT be, kurzor-IT ki; kilépéskor R5 = 2,
+R14/R15 = $0EFF. **Tanulság:** a főciklus di/ei szakasza < 624 T kell (különben egy hang-IT elvész: a tempó 1%-kal
+lassabb volt), és `ei` után legalább egy utasítás a `di` előtt (`ei / di` egymás után = egyetlen tiltott szakasz).
+Mérés: MCP `run {until: SidKep}` + `machine_info` beam, ill. `trace`.
+
 ## Kilépés (2026-11-01, freeTVC headless-ben kipróbálva)
 ESC a gyökérben -> `Kilepes`: doboz középen „Biztosan kilépsz?” I/N (a felhasználó kérése). N vagy ESC (nincs kiírva) = `Rajz()`. I = elengedésre
 vár, `GE::EnableTVCITHandler`, $70 lapozás, a BASIC IX/IY/második regiszterkészlete vissza (`IndMent` a főprogram elején:

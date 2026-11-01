@@ -232,25 +232,9 @@ begin
 		ld	(hl),e
 		inc	hl
 		ld	(hl),d
-		;	hang-IT: 5008 Hz (port 4 = $D9, port 5 also 4 bit = 15, bit 5 = IT)
-		ld	a,($0B12)
-		and	128+64
-		or	15+32
-		ld	($0B12),a
-		ld	c,91
-		in	b,(c)
-		out	($05),a
-		ld	a,$D9
-		out	($04),a
-		;	kurzor-IT ki (CRTC R10/R11 bit 5)
-		ld	a,10
-		out	($70),a
-		ld	a,3+32
-		out	($71),a
-		ld	a,11
-		out	($70),a
-		ld	a,3+32
-		out	($71),a
+		;	hang-IT 5008 Hz, a kephez igazitva (KsSync, a Jatszik masolja a $EF40-re): R5 = 0 (312 sor =
+		;	pontosan 100 hang-IT), a kurzor-IT-re (47. sor vege) var, INSTART, hang-IT be, kurzor-IT ki
+		call	$EF40
 		im	1
 		ei
 		;	--- elengedesre var (a menu gombja)
@@ -285,26 +269,33 @@ begin
 		add	a,a
 		add	a,2
 		ld	(DkSzum),a
-		;	a resek + lepesek atirasa (di/ei)
-		di
+		;	a resek + lepesek atirasa: hangonkent kulon di/ei (egy-egy ~270 T; egyben ~810 T volt - tobb, mint
+		;	a 624 T-s IT-koz, igy kepkockankent egy hang-IT elveszett: a tempo 1%-kal lassabb volt, a keret-sav vandorolt)
 		ld	hl,Res
+		di
 		ld	de,V1SH
 		ld	bc,10
 		ldir
+		ld	de,(DkAll+6)
+		ld	(V1ST+1),de
+		ei
+		nop						;	az ei utan csak a kovetkezo utasitas utan johet IT: e nelkul a di-k osszeernek
+		di
 		ld	de,V2SH
 		ld	bc,10
 		ldir
+		ld	de,(DkAll+16)
+		ld	(V2ST+1),de
+		ei
+		nop
+		di
 		ld	de,V3SH
 		ld	bc,10
 		ldir
+		ld	de,(DkAll+26)
+		ld	(V3ST+1),de
 		ld	a,(DkSzum)
 		ld	(SidOfs+1),a
-		ld	hl,(DkAll+6)
-		ld	(V1ST+1),hl
-		ld	hl,(DkAll+16)
-		ld	(V2ST+1),hl
-		ld	hl,(DkAll+26)
-		ld	(V3ST+1),hl
 		ei
 		;	barmely gomb = vissza a menube
 		call	BillAny
@@ -324,14 +315,16 @@ begin
 		and	$CF				;	hang (bit 4) es hang-IT (bit 5) ki
 		ld	($0B12),a
 		out	($05),a
-		ld	a,10
+		ld	hl,LjCrtc			;	CRTC vissza: R5 = 2, kurzor-IT a 239. sorra, be
+		ld	b,5
+	LjCrtcK:
+		ld	a,(hl)
 		out	($70),a
-		ld	a,3
+		inc	hl
+		ld	a,(hl)
 		out	($71),a
-		ld	a,11
-		out	($70),a
-		ld	a,3
-		out	($71),a
+		inc	hl
+		djnz	LjCrtcK
 		ld	a,$70
 		ld	($0003),a
 		out	($02),a
@@ -359,6 +352,8 @@ begin
 		dw	0
 	LjMentB12:
 		db	0
+	LjCrtc:
+		db	5,2,14,$0E,15,$FF,10,3,11,3
 
 	;	------------------------------------------------ billentyuzet: Z = nincs lenyomva (sorok 0..9, port 3 / $58)
 	BillAny:
@@ -632,9 +627,15 @@ begin
 	SidOfs:
 		add	a,30			;	DC-kiegyenlites + GR16 modbit (kepkockankent irja a fo hurok)
 		out	($06),a
-		ld	e,a				;	keret = a kimenet szine ($EF00-s lap, a Jatszik tolti)
+		ld	e,a				;	keret = a kimenet szine ($EF00-s lap, a Jatszik tolti), de csak a kepkocka
+		ld	a,c				;	elso 16 IT-jeben (C' = 100..85): a 47. sor utan ~50 pontsor; maskor fekete
+		sub	85
+		cp	16
+		ld	a,0
+		jr	nc,SidKer
 		ld	d,$EF
 		ld	a,(de)
+	SidKer:
 		out	($00),a
 		dec	c
 		jr	z,SidKep
@@ -1856,12 +1857,72 @@ begin
 	Ir16(2, 35, p);
 	Ir16(Ir16_X, 35, #PerJel);
 	Ir16(Ir16_X, 35, #Nev);
-	/* keret-szintabla ($EF00, U3): index = a port 6 erteke (szint x 4 + 2); a szin a kozepszinttol valo elteres
-	   szerint (csend = fekete ... fehér) */
+	/* keret-szintabla ($EF00, U3): index = a port 6 erteke (szint x 4 + 2, csak $EF02..$EF3E); a szin a kozepszinttol
+	   valo elteres szerint (csend = fekete ... feher). A $EF40-re a KsSync (a Lejatszas hivja; helyfuggetlen kod). */
 	asm("
+		jr	KsKod
+	KsSync:
+		ld	a,5					;	R5 = 0: 312 sor = 62 400 T = pontosan 100 hang-IT
+		out	($70),a
+		xor	a
+		out	($71),a
+		ld	a,14				;	kurzor-IT: R14/R15 = $02FF (11. karaktersor, 63. oszlop), R10/R11 = 3 -> a 47. sor vege
+		out	($70),a
+		ld	a,$02
+		out	($71),a
+		ld	a,15
+		out	($70),a
+		ld	a,$FF
+		out	($71),a
+		ld	a,10
+		out	($70),a
+		ld	a,3
+		out	($71),a
+		ld	a,11
+		out	($70),a
+		ld	a,3
+		out	($71),a
+		ld	a,$D9				;	hangoszto: P = $FD9 -> 16 x 39 = 624 T
+		out	($04),a
+		ld	a,($0B12)
+		and	128+64
+		or	15
+		out	($05),a				;	hang-IT meg ki
+		or	32
+		ld	($0B12),a
+		ld	b,a
+		out	($07),a
+	KsVar:
+		in	a,($59)				;	bit 4 = 0: a kurzor-IT megjott
+		bit	4,a
+		jr	nz,KsVar
+		in	a,($5B)				;	INSTART: az oszto ujraindul -> az 1. hang-IT 624 T mulva (~3 sorral lejjebb)
+		ld	a,b
+		out	($05),a				;	hang-IT be
+		ld	a,10				;	kurzor-IT ki (R10/R11 bit 5)
+		out	($70),a
+		ld	a,3+32
+		out	($71),a
+		ld	a,11
+		out	($70),a
+		ld	a,3+32
+		out	($71),a
+		out	($07),a
+		ret
+	KsSyncVege:
+	KsKod:
 		di
 		ld	a,$B0
 		out	($02),a
+		ld	hl,KsSyncVege		;	hossz futas kozben (az OrgAsm a cimkek kulonbseget 0-nak forditja)
+		ld	de,KsSync
+		or	a
+		sbc	hl,de
+		ld	b,h
+		ld	c,l
+		ld	hl,KsSync
+		ld	de,$EF40
+		ldir
 		ld	hl,$EF00
 	KsGen:
 		ld	a,l
@@ -1877,6 +1938,8 @@ begin
 		pop	hl
 		ld	(hl),a
 		inc	l
+		ld	a,l
+		cp	$40
 		jr	nz,KsGen
 		ld	a,($0003)
 		out	($02),a
