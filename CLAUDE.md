@@ -71,6 +71,10 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   ESC, könyvtárváltás, logó forog lejátszás után. Lejátszás alatt a logó áll (a hang-IT fut). Windows: a build.ps1-ben
   nincs memória-ellenőrzés.
 
+## A LEJÁTSZÓ VÉGLEGES (2026-11-02, a felhasználó: „végleges lejátszó”; git címke `lejatszo-kesz`)
+.STC 1.3, hangszínpaletta + 16 szintű hangerő, keretcsík a szöveg mellett, százalék, csúszás, kilépés-kérdés.
+Valódi TVC-n (312 soros kép, NanoSD, FISH) még nincs kipróbálva.
+
 ## Lejátszás-kijelző, csúszás, .STC 1.3 (2026-11-02, freeTVC headless-ben kipróbálva)
 - **Százalék a fájlnév mellett** (a felhasználó kérése: csak szám, „0%...100%”, ne vegyen el képsort). A .STC 1.3 (`$FD $FF`)
   az info után 8 byte-ot hoz: N (képkockák), hurokpont, a hurokpont %-a, 0, maradéka (×100 mod N) - a TVC osztás nélkül,
