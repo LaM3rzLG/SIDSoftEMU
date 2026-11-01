@@ -21,6 +21,14 @@ for f in $(ls sid_tvc/*/*.STC 2>/dev/null | sort -V); do
 done
 BETOLTO=SIDSOFT
 utana() {
+  # memoria-ellenorzes (lasd SIDSoftEMU.ras feje): rezidens vege < $2300, kod vege < $5000, mentes <= 12800 byte
+  python3 - <<'PY' || return 1
+import re,sys
+s={m.group(2):int(m.group(1),16) for m in re.finditer(r'al\s+\$([0-9a-f]+)\s+\.(\S+)',open('SIDSoftEMU.sym').read())}
+rez,kod=s['RezVege'],s['EndBlock19ef']; ment=kod-rez+s['end_incbin_Logo_Data']-s['Font16_Data']
+print('memoria: RezVege $%04X (< $2300), kod vege $%04X (< $5000), mentes %d byte (<= 12800)'%(rez,kod,ment))
+if rez>=0x2300 or kod>=0x5000 or ment>12800: print('HIBA: memoria-hatar tullepve!'); sys.exit(1)
+PY
   pwsh -NoProfile -Command "& ./resources/make_dsk.ps1 -Out 'SIDSOFT2.dsk' -Template '$TEMPLATE' -Files @($LEMEZ2_FAJLOK) | Select-Object -Last 1"
 }
 source "$KOZOS/mac/build_kozos.sh"

@@ -30,8 +30,19 @@ Testvérprojektek és minták: `../Ugh`, `../WaterPumpGame`.
   A váz az Ugh-ból jött (`tvc_units/`, `resources/kozos.ps1`, `make_dsk.ps1`, `.vscode/tasks.json`).
 
 ## Munkastílus
-Magyarul, tömören; a lemez az igazság; `.bak_<név>` minden változtatás előtt; kétértelmű kérésnél az értelmezést egy
+Magyarul, tömören; a lemez az igazság; mentés = git (a felhasználó 2026-11-01: `.bak`-ok és átmeneti fájlok NEM kellenek); kétértelmű kérésnél az értelmezést egy
 mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
+
+## SIDSoftEMU = új fájlkezelő + lejátszó (2026-11-01, freeTVC-ben kipróbálva)
+- A `SIDSoftEMU.ras` most: GE unit, GRAPHICS16, a FajlTeszt16 fájlkezelője (Ir16, csúszó sáv, forgó logó IT-ből) + a régi
+  Betolt/Lejatszas (változatlan, csak a port 6 modbitje 2 = GR16). Enter .STC-n: `Jatszik` -> FkFajl, firmware IT,
+  `DalJatszas`, elengedésre vár, `SetMemory($50)`, lista újra (a kijelölés marad), logó-IT vissza.
+- Memória: rezidens vége `RezVege` $229F (< $2300, 97 B tartalék!); kód vége $3115 (< $5000); font $5000, logó $6180
+  (`incbin(fájl, cím)` - asm-ben az incbin relatív útja nem működik); lista $7000. Lejátszás alatt a VID $8A00-tól: kód +
+  font/logó (11 449 B, max 12 800), R6 = 10 (felső 40 pontsor: cím, út, „Szól: név”). A `build_mac.sh` ellenőrzi a határokat.
+- Kipróbálva freeTVC-ben (VT-DOS 1.2): LN1/1 és LN1/5 (47 KB, bájtra egyezik a memóriában), LN3/1, vissza a listába,
+  ESC, könyvtárváltás, logó forog lejátszás után. Lejátszás alatt a logó áll (a hang-IT fut). Windows: a build.ps1-ben
+  nincs memória-ellenőrzés.
 
 ## SID-fájl lejátszás (2026-10-31, ep128emu-ben fut; a felhasználó: "működik, elég jól szól, lehetne jobb" - szünet)
 - `sid/Last_Ninja.sid` (HVSC, 11 aldal). PC: `python3 tools/sid2tvc.py sid/Last_Ninja.sid <aldal>` = 6502-emu
