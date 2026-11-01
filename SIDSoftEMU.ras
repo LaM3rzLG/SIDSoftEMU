@@ -11,7 +11,7 @@ program SIDSoftEMU;
    - Betoltes a ROM-mal (Lemmings-sorrend: $0B0A:=0, $D3 nyitas, $D2 olvasas, $D4 zaras), firmware IT-vel, $70
      lapozassal. A fajl: 2 byte hossz, aztan a dal $C000 feletti resze ($8000-ra = U2, onnan U3-ba), vegul $2300-$BFFF.
    - Lejatszas: teljes 64K RAM ($B0), tablak $F000-$FFFF (paletta a fajlbol, TablaGen: zaj + szintlap), dal $2300-tol
-     (max 52 224 B; $EF00 = keret-szintabla). Sajat hang-IT a
+     (max 51 456 B; $EC00 lejatszas-kijelzo, $EF00 keret-szintabla). Sajat hang-IT a
      $38-on; kilepeskor a rendszer-IT visszaall, majd a fajlkezelo a sajat (logo) IT-jet teszi vissza.
    - Hang-IT: 3 fazisszamlalo IX, IY, HL'. Hangonkent 10 byte-os onmodosito res (tabla + szintlap, vagy negyszog-PWM).
      A port 6-ra a GR16 modbit (2) megy.
@@ -35,14 +35,14 @@ var
 	/* a font es a forgo logo (maszkolt GE sprite 6 x 17, 16 fazis) FIX cimen, a kod moge ($5000-$6E42): a valtozok kozott
 	   a $2300 alatti (rezidens) reszt toltenek ki. Lejatszas alatt a VID-be mentodnek (DalJatszas). */
 	Font16_Data	:	incbin("resources/font16_kek_cian.bin", $5000);			/* 4470 byte */
-	Logo_Data	:	incbin("resources/images/C64_logo_forog.bin", $6180);	/* 3267 byte, vege $6E43 */
+	Logo_Data	:	incbin("resources/images/C64_logo_adat.bin", $6180);	/* 1632 byte: csak az adat (tools/logo_adat.py) */
 	LogoPtr, LogoCim	:	integer = 0;	/* a megszakitas allapota: a kovetkezo fazis, a kepernyocim */
 	LogoSzaml, LogoKesl	:	byte = 1;
 	const LOGO_X		: byte = 57;	/* jobb felso sarok (byte) */
 	const LOGO_Y		: byte = 3;
 	const LOGO_FAZIS	: byte = 16;
 	const LOGO_KESL		: byte = 3;		/* kepkocka / fazis (a sprite-szerkeszto "speed" erteke) */
-	const LOGO_MERET	: integer = 3267;	/* a .bin merete: 3 + 16 fazis x 17 sor x 6 x (maszk, adat) */
+	const LOGO_MERET	: integer = 1632;	/* 16 fazis x 17 sor x 6 byte (a maszk nelkul: a hatter fekete) */
 
 	const LATHATO	: byte = 14;		/* ennyi listasor latszik */
 	const LISTA_Y	: byte = 27;		/* az elso listasor kepsora */
@@ -101,20 +101,20 @@ begin
 		ld	hl,(BtHossz)
 		ld	a,h
 		and	l
-		cp	$FE
-		jr	z,BtUj				;	$FFFE = 1.2
-		ld	a,2					;	1.0 / 1.1: regi formatum
+		cp	$FD
+		jr	z,BtUj				;	$FFFD = 1.3
+		ld	a,2					;	1.0 / 1.1 / 1.2: regi formatum
 		ld	(Hiba),a
 		jr	BtZar
 	BtUj:
-		ld	de,$8000			;	az info-blokk (96 byte) + a paletta (14 x 256) U2-be...
-		ld	bc,96+3584
+		ld	de,$8000			;	az info-blokk (96 + 8 byte) + a paletta (14 x 256) U2-be...
+		ld	bc,104+3584
 		rst	$30
 		db	$D2
 		di
 		ld	a,$B0				;	...a paletta onnan U3-ba ($F000-$FDFF)
 		out	($02),a
-		ld	hl,$8000+96
+		ld	hl,$8000+104
 		ld	de,$F000
 		ld	bc,3584
 		ldir
@@ -297,9 +297,10 @@ begin
 		ld	a,(DkSzum)
 		ld	(SidOfs+1),a
 		ei
+		call	$EC00				;	lejatszas-kijelzo (szazalek; a Jatszik masolja oda)
 		;	barmely gomb = vissza a menube
 		call	BillAny
-		jr	z,LjKor
+		jp	z,LjKor
 
 		;	--- visszaadas a rendszernek
 		di
@@ -628,9 +629,9 @@ begin
 		add	a,30			;	DC-kiegyenlites + GR16 modbit (kepkockankent irja a fo hurok)
 		out	($06),a
 		ld	e,a				;	keret = a kimenet szine ($EF00-s lap, a Jatszik tolti), de csak a kepkocka
-		ld	a,c				;	utolso 16 IT-jeben (C' = 16..1): a 0..47. sor, a szoveg mellett; maskor fekete
-		dec	a
-		cp	16
+		ld	a,c				;	13 IT-jeben (C' = 15..3): ~ a 3..44. sor, a szoveg mellett; maskor fekete
+		sub	3
+		cp	13
 		ld	a,0
 		jr	nc,SidKer
 		ld	d,$EF
@@ -1098,13 +1099,12 @@ LogoIT:
 		ld	de,[LogoCim]
 		call	LogoRajzol
 		jr	LogoITUtan
-; egy fazis kirajzolasa: HL = a fazis (maszk, adat parok), DE = kepernyocim; vissza: HL = a kovetkezo fazis
+; egy fazis kirajzolasa: HL = a fazis (17 x 6 adat-byte), DE = kepernyocim; vissza: HL = a kovetkezo fazis
 LogoRajzol:
 		ld	c,17
 LogoITSor:
 		ld	b,6
 LogoITByte:
-		inc	hl
 		ld	a,(hl)
 		ld	(de),a
 		inc	hl
@@ -1120,12 +1120,12 @@ LogoITNc:
 		jr	nz,LogoITSor
 		ret
 LogoITUtan:
-		ld	de,Logo_Data+3267
+		ld	de,Logo_Data+1632
 		or	a
 		sbc	hl,de
 		add	hl,de
 		jr	nz,LogoITTovabb
-		ld	hl,Logo_Data+3
+		ld	hl,Logo_Data
 LogoITTovabb:
 		ld	[LogoPtr],hl
 		ld	a,[LogoKesl]
@@ -1147,7 +1147,7 @@ end;
 procedure LogoFazis0();
 begin
 	asm("
-		ld	hl,Logo_Data+3
+		ld	hl,Logo_Data
 		ld	de,[LogoCim]
 		call	LogoRajzol
 	");
@@ -1158,7 +1158,7 @@ end;
 procedure LogoIndit();
 begin
 	asm("
-		ld	hl,Logo_Data+3
+		ld	hl,Logo_Data
 		ld	[LogoPtr],hl
 	");
 	LogoCim := LOGO_Y;
@@ -1763,8 +1763,8 @@ begin
 		ld	a,($6F61)			;	$FFFF (1.1) / $FFFE (1.2): van info; 1.0-nal a hossz felso byte-ja < $FF
 		inc	a
 		jr	nz,IoZar
-		ld	de,$6F00
-		ld	bc,96
+		ld	de,$6F00			;	info (96) + hossz/hurok (8, a szazalek-kijelzonek: $6F60)
+		ld	bc,104
 		rst	$30
 		db	$D2
 		ld	a,1
@@ -1804,6 +1804,59 @@ begin
 end;
 
 
+/* a szovegsav csusztatasa (CRTC R7 = a fuggoleges szinkron helye): k = 0 le, a kep kozepere (66 -> 42 = 24 karaktersor =
+   96 pontsor), k = 1 vissza. Kepkockankent egy lepes, lassulva; a kepkockat a kurzor-IT jelzi (a 47. sor vege). */
+procedure Csusztatas();
+begin
+	asm("
+		jr	KcKod
+	KcTabla:
+		db	66,66,65,65,64,64,63,62,61,60,59,58,56,55,54,53,52,50,49,48,47,46,45,44,44,43,43,42,42,42
+	KcKod:
+		di
+		ld	a,14
+		out	($70),a
+		ld	a,$02
+		out	($71),a
+		ld	a,15
+		out	($70),a
+		ld	a,$FF
+		out	($71),a
+		ld	hl,KcTabla
+		ld	de,1
+		ld	a,(k)
+		or	a
+		jr	z,KcEl
+		ld	hl,KcKod-1
+		ld	de,$FFFF
+	KcEl:
+		ld	b,30
+	KcK:
+		out	($07),a
+	KcV:
+		in	a,($59)
+		bit	4,a
+		jr	nz,KcV
+		ld	a,7
+		out	($70),a
+		ld	a,(hl)
+		out	($71),a
+		add	hl,de
+		djnz	KcK
+		ld	a,14				;	a kurzor-IT vissza a 239. sorra (a rendszere)
+		out	($70),a
+		ld	a,$0E
+		out	($71),a
+		ld	a,15
+		out	($70),a
+		ld	a,$FF
+		out	($71),a
+		out	($07),a
+		ei
+	");
+end;
+
+
 /* a kijelolt .STC lejatszasa (a nev a Nev-ben): FkFajl = hossz + ut + \ + nev; lejatszas utan a lista ujra */
 procedure Jatszik();
 begin
@@ -1833,6 +1886,12 @@ begin
 	/* lejatszas alatt csak a felso 48 pontsor latszik: cim, szerzo, kiadas, konyvtar\fajl; jobbra a logo 0. fazisa */
 	GE::EnableTVCITHandler();		/* a logo-IT itt all le (a betolteshez a firmware IT kell) */
 	InfoOlvas();
+	asm("
+		ld	a,6					;	csak a felso 48 pontsor (a lista es a segedrajz nem latszik; a DalJatszas is ezt allitja)
+		out	($70),a
+		ld	a,12
+		out	($71),a
+	");
 	GE::FillRect(0, 0, 64, 48, 0);
 	LogoFazis0();
 	if (InfoVan = 1) then
@@ -1857,6 +1916,188 @@ begin
 	Ir16(2, 35, p);
 	Ir16(Ir16_X, 35, #PerJel);
 	Ir16(Ir16_X, 35, #Nev);
+	/* lejatszas-kijelzo a fajlnev mellett: 3 szamjegy-cella (3 byte szeles) + a % jel. A szamjegyeket az Ir16 az 50.
+	   sorba rajzolja (a lista helyere; lejatszas alatt ugyis a mentes van ott), onnan cellankent a $ECD0-ra (U3) kerulnek;
+	   a kepkockankenti kod (PrKod, ~165 byte) a $EC00-ra. Valtozok: $ECB0 szamjegyek, $ECB4 N, L, a hurok %-a, 0, maradeka
+	   (a .STC 1.3 fejlecebol, $6F60), $ECBC kepkocka, $ECBE maradek (x 100 mod N), $ECC0 %, $ECC1 a kirajzolt %, $ECC2
+	   kepcim. A dal ezert legfeljebb $EBFF-ig tart. */
+	Elso := Ir16_X + 1;
+	if (Elso > 51) then Elso := 51;
+	InfoSor[0] := 37;
+	InfoSor[1] := 0;
+	Ir16(Elso + 9, 35, #InfoSor);
+	k := 0;
+	while (k < 10) do
+	begin
+		InfoSor[0] := 48 + k;
+		Ir16(k * 3, 50, #InfoSor);
+		k := k + 1;
+	end;
+	asm("
+		jp	PrKodVege
+	PrKod:
+		ld	hl,($ECBC)			;	kepkocka + 1; a vegen (= N) vissza a hurokpontra
+		inc	hl
+		ld	de,($ECB4)
+		or	a
+		sbc	hl,de
+		jr	nz,PrNem
+		ld	hl,($ECB6)
+		ld	($ECBC),hl
+		ld	hl,($ECBA)
+		ld	($ECBE),hl
+		ld	a,($ECB8)
+		jr	PrP
+	PrNem:
+		add	hl,de
+		ld	($ECBC),hl
+		ld	hl,($ECBE)			;	maradek + 100; amig >= N: - N, % + 1
+		ld	bc,100
+		add	hl,bc
+		ld	a,($ECC0)
+	PrOszt:
+		scf
+		ccf
+		sbc	hl,de
+		jr	c,PrKi
+		inc	a
+		jr	PrOszt
+	PrKi:
+		add	hl,de
+		ld	($ECBE),hl
+	PrP:
+		ld	($ECC0),a
+		ld	hl,$ECC1
+		cp	(hl)
+		ret	z
+		ld	(hl),a
+		ld	bc,$0A0A			;	szazas, tizes (10 = ures cella), egyes
+		cp	100
+		jr	c,PrK1
+		ld	bc,$0001
+		xor	a
+		jr	PrK3
+	PrK1:
+		cp	10
+		jr	c,PrK3
+		ld	b,$FF
+	PrK2:
+		inc	b
+		sub	10
+		jr	nc,PrK2
+		add	a,10
+	PrK3:
+		ld	hl,$ECB0
+		ld	(hl),c
+		inc	hl
+		ld	(hl),b
+		inc	hl
+		ld	(hl),a
+		ld	a,$90				;	U0, U1, VID, U3 (a hang-IT nem hasznalja a 2. lapot)
+		out	($02),a
+		ld	hl,$ECB0
+		ld	de,($ECC2)
+	PrCel:
+		push	hl
+		push	de
+		ld	l,(hl)
+		ld	h,0
+		add	hl,hl
+		ld	b,h
+		ld	c,l
+		add	hl,hl
+		add	hl,hl
+		add	hl,hl
+		add	hl,hl
+		or	a
+		sbc	hl,bc
+		ld	bc,$ECD0			;	cella = $ECD0 + 30 x szamjegy
+		add	hl,bc
+		ld	a,10
+	PrSor:
+		ldi
+		ldi
+		ldi
+		ex	de,hl
+		ld	bc,61
+		add	hl,bc
+		ex	de,hl
+		dec	a
+		jr	nz,PrSor
+		pop	de
+		inc	de
+		inc	de
+		inc	de
+		pop	hl
+		inc	hl
+		ld	a,l
+		cp	$B3
+		jr	nz,PrCel
+		ld	a,$B0
+		out	($02),a
+		ret
+	PrKodVege:
+		di
+		ld	a,$90
+		out	($02),a
+		ld	hl,PrKodVege		;	hossz futas kozben (az OrgAsm a cimkek kulonbseget 0-nak forditja)
+		ld	de,PrKod
+		or	a
+		sbc	hl,de
+		ld	b,h
+		ld	c,l
+		ld	hl,PrKod
+		ld	de,$EC00
+		ldir
+		ld	de,$ECD0			;	10 cella x 10 sor x 3 byte az 50. sorbol
+		ld	hl,$8C80				;	$8000 + 50 x 64
+		ld	c,10
+	PrSzK:
+		push	hl
+		ld	b,10
+	PrSzR:
+		push	bc
+		push	hl
+		ld	bc,3
+		ldir
+		pop	hl
+		ld	bc,64
+		add	hl,bc
+		pop	bc
+		djnz	PrSzR
+		pop	hl
+		inc	hl
+		inc	hl
+		inc	hl
+		dec	c
+		jr	nz,PrSzK
+		ld	b,30				;	ures cella
+		xor	a
+	PrUres:
+		ld	(de),a
+		inc	de
+		djnz	PrUres
+		ld	hl,$6F60			;	N, L, a hurok %-a, 0, maradeka
+		ld	de,$ECB4
+		ld	bc,8
+		ldir
+		ld	hl,0
+		ld	($ECBC),hl
+		ld	($ECBE),hl
+		xor	a
+		ld	($ECC0),a
+		dec	a
+		ld	($ECC1),a
+		ld	a,(Elso)
+		ld	l,a
+		ld	h,0
+		ld	de,$88C0				;	$8000 + 35 x 64
+		add	hl,de
+		ld	($ECC2),hl
+		ld	a,($0003)
+		out	($02),a
+		ei
+	");
 	/* keret-szintabla ($EF00, U3): index = a port 6 erteke (szint x 4 + 2, csak $EF02..$EF3E); a szin a kozepszinttol
 	   valo elteres szerint (csend = fekete ... feher). A $EF40-re a KsSync (a Lejatszas hivja; helyfuggetlen kod). */
 	asm("
@@ -1949,7 +2190,11 @@ begin
 		db	$AA,$A8,$A0,$A2,$22,$82,$02,$00,$00,$02,$82,$22,$A2,$A0,$A8,$AA
 	KsVege:
 	");
+	k := 0;
+	Csusztatas();			/* a szovegsav le, a kep kozepere */
 	DalJatszas();
+	k := 1;
+	Csusztatas();			/* vissza (R6 = 60, a kep alja mar fekete) */
 	asm("
 	JtElenged:
 		call	BillAny				;	a lejatszast leallito gomb ne jusson a fajlkezelohoz

@@ -22,10 +22,11 @@
  *      ahol a memoria sosem ismetlodik); ha nem talal, a memoria-hurok.
  *   4. Tomorites hangonkent (rekord / varakozas / REF visszahivatkozas), a hurokpontra ugro VEGE-vel.
  *
- * A .STC formatum (1.2): $FE $FF, 3 x 32 byte info (cim, szerzo, kiadas; 0-val zarva, a TVC-s fontban
- * nem levo jelek szokozre csereve), 14 x 256 byte paletta (ertek x 16; a TVC-n $F000-$FDFF), majd 2 byte hossz (L),
- * a dal $C000 feletti resze, vegul a SONG_BASE..$BFFF resz. (1.1 = $FF $FF + info, 1.0 = rogton L: a TVC ezeket
- * mar nem jatssza le, "regi .STC".)
+ * A .STC formatum (1.3): $FD $FF, 3 x 32 byte info (cim, szerzo, kiadas; 0-val zarva, a TVC-s fontban
+ * nem levo jelek szokozre csereve), 8 byte: N (kepkockak), hurokpont, a hurokpont szazaleka, 0, a maradek (hurokpont
+ * x 100 mod N) - a TVC ebbol szamolja a 0..100%-ot -, 14 x 256 byte paletta (ertek x 16; a TVC-n $F000-$FDFF), majd
+ * 2 byte hossz, a dal $C000 feletti resze, vegul a SONG_BASE..$BFFF resz. (1.2 = $FE $FF, paletta, hossz/hurok nelkul;
+ * 1.1 = $FF $FF + info, 1.0 = rogton a hossz: a TVC ezeket mar nem jatssza le, "regi .STC".)
  * A dal (SONG_BASE-tol): 6 byte fejlec (a 3 hang folyamanak cime), hangonkent kepkockankent egy rekord:
  *   c = $00..$0F  bit 0 = lepes (2 byte), bit 1 = lepes += elojeles byte, bit 2 = szelet (1 byte: felso 4 bit
  *                 tabla 0..13 paletta / 14 zaj / 15 negyszog, also 4 bit szint 0..15), bit 3 = PW (1 byte)
@@ -52,11 +53,12 @@
 #define MKDIR(p) mkdir((p), 0755)
 #endif
 
-#define VERZIO "1.2"
+#define VERZIO "1.3"
 
 /* ------------------------------------------------------------------ TVC-oldali allandok */
 #define SONG_BASE   0x2300              /* a dal cime a TVC-n */
-#define TABLE_BASE  0xEF00              /* $EF00 keret-szintabla, $F000-$FDFF paletta (a .STC-bol), $FE00 zaj, $FF00 szintlap */
+#define TABLE_BASE  0xEC00              /* $EC00 szazalek-kijelzo (kod + szamjegyek), $EF00 keret-szintabla, $F000-$FDFF paletta,
+                                           $FE00 zaj, $FF00 szintlap */
 #define SONG_MAX    (TABLE_BASE - SONG_BASE)
 #define IT_PER_FRAME 100
 #define PAL_CLK     985248.0
@@ -1337,10 +1339,16 @@ static int aldal(const SidFajl *s, const char *path, int song, const char *outdi
     if (!fo) { fprintf(stderr, "\nnem irhato: %s\n", fajl); return 0; }
     {
         int split = 0xC000 - SONG_BASE;
-        w16(fo, 0xFFFE);                        /* 1.2: info-blokk + paletta */
+        long Lh = dp.loop < 0 ? 0 : dp.loop, x = Lh * 100;
+        w16(fo, 0xFFFD);                        /* 1.3: info-blokk + hossz/hurok + paletta */
         info_ir(fo, s->name);
         info_ir(fo, s->author);
         info_ir(fo, s->released);
+        w16(fo, dp.n);                          /* N: kepkockak, L: hurokpont, a hurokpont %-a es maradeka (x 100 / N) */
+        w16(fo, (int)Lh);
+        fputc((int)(x / dp.n), fo);
+        fputc(0, fo);
+        w16(fo, (int)(x % dp.n));
         fwrite(Paletta, 1, sizeof(Paletta), fo);
         w16(fo, blob.n);
         if (blob.n > split) fwrite(blob.b + split, 1, blob.n - split, fo);

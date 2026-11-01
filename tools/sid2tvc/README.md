@@ -53,7 +53,7 @@ A `SID_TVC` mappát változatlan szerkezetben kell a TVC lemezére / SD-kártyá
   (súlyozott k-közép a felharmonikus-spektrumon); + zaj; a tiszta, szűretlen négyszög PW-összehasonlítás marad.
 - **Hangerő (1.2):** hangonként 16 szint; a DAC 15 szintje dalonként állandó erősítéssel (a hangos képkockák
   99. percentilise = 15), hiszterézissel (kevesebb változás = kisebb fájl); DC-kiegyenlítés a TVC-n.
-- **Tömörítés** hangonként (ismétlődő részek visszahivatkozással); a kész dal legfeljebb 52 480 bájt ($2300-$EFFF) lehet.
+- **Tömörítés** hangonként (ismétlődő részek visszahivatkozással); a kész dal legfeljebb 51 456 bájt ($2300-$EBFF) lehet.
 - Minden kimenetet visszaellenőriz a TVC lejátszójának pontos mására.
 
 Nem kezeli (egyelőre): többszörös sebességű (CIA-val gyorsított) dalok, digi-hangok.
@@ -61,9 +61,10 @@ A 2,5 kHz feletti hangokat a TVC (5008 Hz-es mintavétel) nem tudja tisztán lej
 
 ## A .STC formátum
 
-**1.2 (2026-11-01):** `$FE $FF`, aztán 3 × 32 bájt info a .sid fejlécéből: cím, szerző, kiadás (31 jel + 0; ami a
-TVC-s fontban nincs, az szóköz), 14 × 256 bájt paletta (érték × 16; a TVC-n `$F000-$FDFF`), 2 bájt hossz (L), a dal
-`$C000` feletti része, végül a `$2300..$BFFF` rész (így a TVC ROM-jával egyszerűen betölthető). A régi 1.1-es
+**1.3 (2026-11-02):** `$FD $FF`, aztán 3 × 32 bájt info a .sid fejlécéből: cím, szerző, kiadás (31 jel + 0; ami a
+TVC-s fontban nincs, az szóköz), 8 bájt a lejátszás-kijelzőhöz (N = képkockák, a hurokpont, a hurokpont százaléka, 0, a
+maradék), 14 × 256 bájt paletta (érték × 16; a TVC-n `$F000-$FDFF`), 2 bájt hossz (L), a dal
+`$C000` feletti része, végül a `$2300..$BFFF` rész (így a TVC ROM-jával egyszerűen betölthető). A régi 1.2-es (`$FE $FF`), 1.1-es
 (`$FF $FF` + info) és 1.0-s (rögtön L) fájlt a SIDSoftEMU már nem játssza le („Régi .STC”). A dal `$2300`-tól:
 6 bájtos fejléc (a 3 hang folyamának címe), majd hangonként képkockánként egy rekord:
 

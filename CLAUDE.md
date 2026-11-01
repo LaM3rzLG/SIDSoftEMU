@@ -71,9 +71,25 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   ESC, könyvtárváltás, logó forog lejátszás után. Lejátszás alatt a logó áll (a hang-IT fut). Windows: a build.ps1-ben
   nincs memória-ellenőrzés.
 
+## Lejátszás-kijelző, csúszás, .STC 1.3 (2026-11-02, freeTVC headless-ben kipróbálva)
+- **Százalék a fájlnév mellett** (a felhasználó kérése: csak szám, „0%...100%”, ne vegyen el képsort). A .STC 1.3 (`$FD $FF`)
+  az info után 8 byte-ot hoz: N (képkockák), hurokpont, a hurokpont %-a, 0, maradéka (×100 mod N) - a TVC osztás nélkül,
+  maradékkal lépteti (R += 100; amíg R ≥ N: R -= N, % + 1), a végén a hurokpont %-ára ugrik. A `Jatszik` előkészít: az Ir16
+  a 0-9 jegyeket az 50. sorba rajzolja, onnan cellánként (3 byte × 10 sor) a `$ECD0`-ra, a 11. cella üres; a `%` jelet egyszer
+  kiírja; a képkockánkénti kód (`PrKod`, 163 byte, helyfüggetlen) a `$EC00`-ra, változók `$ECB0..$ECC3`. A főciklus
+  `call $EC00`; rajzoláskor `$90` lapozás (U0,U1,VID,U3). **A dal ezért legfeljebb $EBFF-ig** (51 456 B; 33/34 elfér).
+- **Csúszás** (a felhasználó kérése): az infó után a szövegsáv lecsúszik a kép közepére - CRTC **R7** 66 -> 42 (24 karaktersor
+  = 96 pontsor), 30 képkocka, lassulva (`Csusztatas`, k = 0 le / 1 fel; a képkockát a kurzor-IT a 47. sor végén jelzi, DI
+  mellett pollozva), a lejátszás után vissza. R6 = 12 már az `InfoOlvas` után (a lista és a segédrajz ne látsszon).
+- **A logó maszk nélkül** (`resources/images/C64_logo_adat.bin`, 1632 B = `python3 tools/logo_adat.py
+  resources/images/C64_logo_forog.bin resources/images/C64_logo_adat.bin`; a háttér fekete, a maszk fölösleges): a VID-be
+  mentett rész így 12 081 B (a határ 13 312) - enélkül a kijelző + csúszás nem fért el. **Ha a BMP-k frissülnek: bmp2ge.py,
+  aztán logo_adat.py!**
+- asm-ben a `*` szorzást a TRSE elrontja (`$8000+50*64` -> hiba): kiszámolt konstans kell; `jr` > 127 byte -> `jp`.
+
 ## Keret-sáv lejátszás közben (2026-11-02, freeTVC-ben kipróbálva; a felhasználó: „a szöveg alatt, max 50 pixel”)
 A hang-IT a kimenet színét (`$EF00` tábla, a középszinttől való eltérés: fekete…fehér) a keretre írja, de csak a
-képkocka utolsó 16 IT-jében (C' = 16..1) = a 0..47. sor, a szöveg mellett (a felhasználó 2026-11-02: alatta zavaró); máskor fekete. Ehhez: lejátszás közben
+képkocka 13 IT-jében (C' = 15..3) = kb. a 3..44. sor, a szöveg mellett (2026-11-02: 20%-kal vékonyabb, ne lógjon ki) (a felhasználó 2026-11-02: alatta zavaró); máskor fekete. Ehhez: lejátszás közben
 **R5 = 0** (312 sor = 62 400 T = pontosan 100 hang-IT), indításkor `KsSync` ($EF40, a Jatszik másolja oda): kurzor-IT
 a 47. sor végére (R14/R15 = $02FF), arra vár, INSTART (`in a,($5B)`), hang-IT be, kurzor-IT ki; kilépéskor R5 = 2,
 R14/R15 = $0EFF. **Tanulság:** a főciklus di/ei szakasza < 624 T kell (különben egy hang-IT elvész: a tempó 1%-kal
