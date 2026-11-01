@@ -71,6 +71,11 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   ESC, könyvtárváltás, logó forog lejátszás után. Lejátszás alatt a logó áll (a hang-IT fut). Windows: a build.ps1-ben
   nincs memória-ellenőrzés.
 
+## Kiadás (2026-11-02): NYILVÁNOS repó `../TVC-Programok` (https://github.com/LaM3rzLG/TVC-Programok)
+A felhasználó kész programjai programonként egy mappában (csak futtatható fájlok, forrás nem). SIDSoftEMU 1.0 = `SIDSOFT.CAS`
++ `SID_TVC/` + a két .dsk + README + `kepek/`; GitHub-release `sidsoftemu-1.0` (ZIP). Frissítés menete: a TVC-Programok
+CLAUDE.md-jében. A `sid2tvc` később kerül ki (Win/Mac/Linux, felülettel; GPL-3 -> a forrás is mellé).
+
 ## A LEJÁTSZÓ VÉGLEGES (2026-11-02, a felhasználó: „végleges lejátszó”; git címke `lejatszo-kesz`)
 .STC 1.3, hangszínpaletta + 16 szintű hangerő, keretcsík a szöveg mellett, százalék, csúszás, kilépés-kérdés.
 Valódi TVC-n (312 soros kép, NanoSD, FISH) még nincs kipróbálva.
