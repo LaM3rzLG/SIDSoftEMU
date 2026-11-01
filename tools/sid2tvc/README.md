@@ -7,9 +7,9 @@ Egyetlen C99 forrásfájl (`sid2tvc.c`), külső könyvtár nélkül; Macen, Lin
 
 | Rendszer | Mi kell | Parancs (ebben a mappában) |
 |---|---|---|
-| macOS | Xcode parancssori eszközök (`xcode-select --install`) | `cc -O2 -std=c99 -ffp-contract=off -o sid2tvc sid2tvc.c` |
-| Linux | gcc vagy clang (pl. `sudo apt install build-essential`) | `gcc -O2 -std=c99 -ffp-contract=off -o sid2tvc sid2tvc.c` |
-| Windows (MSYS2 / MinGW-w64) | <https://www.msys2.org>, majd `pacman -S mingw-w64-ucrt-x86_64-gcc` | `gcc -O2 -std=c99 -ffp-contract=off -o sid2tvc.exe sid2tvc.c` |
+| macOS | Xcode parancssori eszközök (`xcode-select --install`) | `cc -O2 -std=c99 -ffp-contract=off -o sid2tvc sid2tvc.c -lm` |
+| Linux | gcc vagy clang (pl. `sudo apt install build-essential`) | `gcc -O2 -std=c99 -ffp-contract=off -o sid2tvc sid2tvc.c -lm` |
+| Windows (MSYS2 / MinGW-w64) | <https://www.msys2.org>, majd `pacman -S mingw-w64-ucrt-x86_64-gcc` | `gcc -O2 -std=c99 -ffp-contract=off -o sid2tvc.exe sid2tvc.c -lm` |
 | Windows (Visual Studio) | "Developer Command Prompt" | `cl /O2 /fp:precise sid2tvc.c` |
 
 Make-kel: `make` (Mac/Linux/MSYS2).
@@ -29,6 +29,8 @@ sid2tvc [-s N | -a] [-o MAPPA] [-n NÉV] [-w] [-f N] [-m] [-q] fajl.sid
   -f N      hurok nélkül legfeljebb N képkocka (50/mp; alapértelmezés 30000 = 10 perc)
   -m        csak a memória-hurok (a hang ismétlődését nem keresi)
   -q        csak a hibákat írja ki
+  -U        KÍSÉRLETI (csak WAV, a .STC nem változik): B = a mostani hang, C = hangszínpaletta,
+            D = paletta + okos hangerő-elosztás; -t MP a hossz (60), -P N a paletta mérete (15 + zaj)
 ```
 
 Példa: `sid2tvc -a -w Last_Ninja.sid` → `SID_TVC/LASTNINJ/SONG1.STC ... SONG11.STC` (+ WAV).

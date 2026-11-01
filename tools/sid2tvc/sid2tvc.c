@@ -931,6 +931,379 @@ static int wav_ir(const char *path, const All *T, int nfr)
     return 1;
 }
 
+/* ================================================================== 5. KISERLETI uj hang (csak WAV, -U): hangszinpaletta
+   + okos hangero-elosztas. A .STC meg a regi; ez az A/B osszehasonlitashoz kell (a felhasznalo dont).
+   - Hangszin: hangonkent, kepkockankent egy ciklus a SID valodi hullamabol (kevert hullamok = AND, gyurumodulacio
+     es szinkron a forrashang periodusaval kozelitve), a TVC Nyquist-hataraig (2,5 kHz) savkorlatozva, a szurovel
+     (6581-es vagofrekvencia-gorbe, LP/BP/HP, rezonancia) a felharmonikusokon. Ebbol 0..15-os, 256 byte-os tabla.
+   - Paletta: dalonkent PAL_N tabla (sulyozott k-kozep a felharmonikus-spektrumon), + 1 zaj-tabla; kepkockankent
+     a legkozelebbi. A tiszta, szuretlen negyszog marad a PW-osszehasonlitas (a TVC "res"-e).
+   - Hangero: a tabla erteke (0..15) x szint (0..15) / 15 masodik tablaval. C = hangonkent legfeljebb 5 (mint most),
+     D = a 15 szint elosztasa a szolo hangok kozott (elore nezve lassan valtozo erosites) + DC-kiegyenlites. */
+#include <math.h>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+#define UJ_M 1024                       /* egy ciklus mintai a spektrumhoz */
+#define PAL_MAX 16
+static int uj_wav = 0, uj_sec = 60, pal_n = 15;
+static const double TVC_FS = 3125000.0 / 16 / 39;
+
+typedef struct { uint8_t q[256]; double p; float ft[24]; double w; int pal; } Alak;
+typedef struct { uint64_t key; int key2, idx; } AKulcs;
+typedef struct { int tip, alak, step, pw; double a; } UjH;   /* tip: 0 csend, 1 tabla, 2 negyszog, 3 zaj */
+
+static Alak *alakok; static int nalak, capalak;
+static AKulcs *ahash; static int ahmeret;
+
+static double fc6581(int r)
+{
+    static const int X[] = {0, 256, 384, 512, 640, 768, 896, 1023, 1024, 1280, 1536, 1792, 2047};
+    static const double Y[] = {220, 250, 300, 420, 780, 1600, 3200, 6000, 4600, 7500, 10500, 13500, 18000};
+    int i;
+    for (i = 0; i < 12; i++)
+        if (r <= X[i + 1]) return Y[i] + (Y[i + 1] - Y[i]) * (r - X[i]) / (double)(X[i + 1] - X[i] ? X[i + 1] - X[i] : 1);
+    return 18000;
+}
+
+/* a szuro atvitele (abszolut ertek nelkul, komplex) f Hz-en */
+static void szuro(double f, int fcr, int res, int mode, double *re, double *im)
+{
+    double fc = fc6581(fcr), x = f / fc, Q = 0.707 + 1.3 * res / 15.0;
+    double dr = 1 - x * x, di = x / Q, d2 = dr * dr + di * di;
+    double nr = 0, ni = 0;
+    if (mode & 1) nr += 1;                       /* LP: 1 */
+    if (mode & 2) ni += x;                       /* BP: jx */
+    if (mode & 4) nr -= x * x;                   /* HP: -x^2 */
+    *re = (nr * dr + ni * di) / d2;
+    *im = (ni * dr - nr * di) / d2;
+}
+
+static void fft(double *re, double *im, int n)
+{
+    int i, j, k, m;
+    for (i = 1, j = 0; i < n; i++) {
+        int bit = n >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) { double t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+    }
+    for (m = 2; m <= n; m <<= 1) {
+        double a = -2 * M_PI / m;
+        for (k = 0; k < n; k += m)
+            for (j = 0; j < m / 2; j++) {
+                double wr = cos(a * j), wi = sin(a * j);
+                double xr = re[k + j + m / 2] * wr - im[k + j + m / 2] * wi;
+                double xi = re[k + j + m / 2] * wi + im[k + j + m / 2] * wr;
+                re[k + j + m / 2] = re[k + j] - xr; im[k + j + m / 2] = im[k + j] - xi;
+                re[k + j] += xr; im[k + j] += xi;
+            }
+    }
+}
+
+static void alak_jegy(Alak *a)                /* a 0..15-os tabla felharmonikus-spektruma (egysegnyi hossz) */
+{
+    double re[256], im[256], s = 0;
+    int i;
+    for (i = 0; i < 256; i++) { re[i] = a->q[i]; im[i] = 0; }
+    fft(re, im, 256);
+    for (i = 0; i < 24; i++) { a->ft[i] = (float)sqrt(sqrt(re[i + 1] * re[i + 1] + im[i + 1] * im[i + 1])); s += a->ft[i] * a->ft[i]; }
+    s = sqrt(s);
+    for (i = 0; i < 24; i++) a->ft[i] = (float)(s > 0 ? a->ft[i] / s : 0);
+}
+
+/* egy ciklus: hullam (ctrl felso 4 bit), sajat F, forras Fs (gyuru/szinkron), pw (12 bit), szuro (route=1 eseten) */
+static int alak_keres(int wave, int ring, int sync, int F, int Fs, int fb, int pw, int route, int fcr, int res, int mode)
+{
+    uint64_t key = (uint64_t)wave | ((uint64_t)ring << 4) | ((uint64_t)sync << 5) | ((uint64_t)route << 6)
+                 | ((uint64_t)F << 7) | ((uint64_t)((ring || sync) ? Fs : 0) << 23) | ((uint64_t)((wave & 4) ? pw : 0) << 39)
+                 | ((uint64_t)(route ? fcr : 0) << 51);
+    int key2 = route ? (res | (mode << 4)) : 0;
+    unsigned h = (unsigned)(((key ^ ((uint64_t)key2 << 57)) * 0x9E3779B97F4A7C15ULL) >> 40);
+    static double re[UJ_M], im[UJ_M];
+    double s[256], mn = 1e9, mx = -1e9, fbhz, fmax;
+    int i, k, K, idx;
+    Alak *a;
+    if (!ahash) { ahmeret = 1 << 18; ahash = xmalloc(sizeof(AKulcs) * ahmeret); for (i = 0; i < ahmeret; i++) ahash[i].idx = -1; }
+    idx = h & (ahmeret - 1);
+    while (ahash[idx].idx >= 0) { if (ahash[idx].key == key && ahash[idx].key2 == key2) return ahash[idx].idx; idx = (idx + 1) & (ahmeret - 1); }
+    if (nalak * 2 > ahmeret) { fprintf(stderr, "tul sok hangszin\n"); exit(2); }
+    for (i = 0; i < UJ_M; i++) {
+        uint32_t acc = (uint32_t)fmod((double)i / UJ_M * F / fb * 16777216.0, 16777216.0);
+        uint32_t sacc = (uint32_t)fmod((double)i / UJ_M * Fs / fb * 16777216.0, 16777216.0);
+        int msb = (acc >> 23) & 1, o = 0xFFF;
+        if (ring) msb ^= (sacc >> 23) & 1;
+        if (wave & 1) o &= (int)(((msb ? ~acc : acc) >> 11) & 0xFFF);
+        if (wave & 2) o &= (int)(acc >> 12);
+        if (wave & 4) o &= ((int)(acc >> 12) >= pw) ? 0xFFF : 0;
+        re[i] = o / 4095.0 * 2 - 1; im[i] = 0;
+    }
+    fft(re, im, UJ_M);
+    fbhz = fb * PAL_CLK / 16777216.0;
+    fmax = TVC_FS * 0.5;
+    K = (int)(fmax / (fbhz > 1 ? fbhz : 1));
+    if (K > 120) K = 120;
+    for (i = 0; i < 256; i++) s[i] = 0;
+    for (k = 1; k <= K; k++) {
+        double cr = re[k] / (UJ_M / 2), ci = im[k] / (UJ_M / 2);
+        if (route) {
+            double hr, hi, t;
+            szuro(k * fbhz, fcr, res, mode, &hr, &hi);
+            t = cr * hr - ci * hi; ci = cr * hi + ci * hr; cr = t;
+        }
+        for (i = 0; i < 256; i++) {
+            double ph = 2 * M_PI * k * i / 256.0;
+            s[i] += cr * cos(ph) - ci * sin(ph);
+        }
+    }
+    for (i = 0; i < 256; i++) { if (s[i] < mn) mn = s[i]; if (s[i] > mx) mx = s[i]; }
+    if (nalak == capalak) { capalak = capalak ? capalak * 2 : 1024; alakok = xrealloc(alakok, sizeof(Alak) * capalak); }
+    a = &alakok[nalak];
+    memset(a, 0, sizeof(Alak));
+    a->p = (mx - mn) / 2;
+    for (i = 0; i < 256; i++) a->q[i] = (uint8_t)(a->p > 1e-6 ? (int)((s[i] - mn) / (mx - mn) * 15 + 0.5) : 7);
+    alak_jegy(a);
+    ahash[idx].key = key; ahash[idx].key2 = key2; ahash[idx].idx = nalak;
+    return nalak++;
+}
+
+static double jdist(const float *a, const float *b)
+{
+    double d = 0; int i;
+    for (i = 0; i < 24; i++) { double t = a[i] - b[i]; d += t * t; }
+    return d;
+}
+
+/* sulyozott k-kozep -> pal[k] = a kozephez legkozelebbi alak (valodi tabla) */
+static int paletta(int *pal)
+{
+    float C[PAL_MAX][24];
+    double W[PAL_MAX], acc[PAL_MAX][24];
+    int n = 0, i, k, it, j;
+    uint32_t r = 12345;
+    double best;
+    for (i = 0; i < nalak; i++) if (alakok[i].w > 0) n++;
+    if (n == 0) return 0;
+    /* k-means++ (determinisztikus): az elso a legnagyobb sulyu, utana a legtavolabbi (sullyal) */
+    best = -1; k = 0;
+    for (i = 0; i < nalak; i++) if (alakok[i].w > best) { best = alakok[i].w; k = i; }
+    memcpy(C[0], alakok[k].ft, sizeof(C[0]));
+    for (j = 1; j < pal_n; j++) {
+        double bd = -1; int bi = -1;
+        for (i = 0; i < nalak; i++) {
+            double d = 1e9; int c;
+            if (alakok[i].w <= 0) continue;
+            for (c = 0; c < j; c++) { double t = jdist(alakok[i].ft, C[c]); if (t < d) d = t; }
+            d *= alakok[i].w;
+            if (d > bd) { bd = d; bi = i; }
+        }
+        if (bi < 0 || bd <= 0) break;
+        memcpy(C[j], alakok[bi].ft, sizeof(C[0]));
+    }
+    k = j;
+    (void)r;
+    for (it = 0; it < 40; it++) {
+        memset(W, 0, sizeof(W)); memset(acc, 0, sizeof(acc));
+        for (i = 0; i < nalak; i++) {
+            double d = 1e9; int c, bc = 0;
+            if (alakok[i].w <= 0) continue;
+            for (c = 0; c < k; c++) { double t = jdist(alakok[i].ft, C[c]); if (t < d) { d = t; bc = c; } }
+            alakok[i].pal = bc;
+            W[bc] += alakok[i].w;
+            for (j = 0; j < 24; j++) acc[bc][j] += alakok[i].w * alakok[i].ft[j];
+        }
+        for (i = 0; i < k; i++) if (W[i] > 0) for (j = 0; j < 24; j++) C[i][j] = (float)(acc[i][j] / W[i]);
+    }
+    for (i = 0; i < k; i++) {
+        double d = 1e9; int bi = -1, a;
+        for (a = 0; a < nalak; a++) {
+            double t;
+            if (alakok[a].w <= 0 || alakok[a].pal != i) continue;
+            t = jdist(alakok[a].ft, C[i]);
+            if (t < d) { d = t; bi = a; }
+        }
+        pal[i] = bi;
+    }
+    /* minden alak (a nem hasznaltak is) a legkozelebbi paletta-tablat kapja */
+    for (i = 0; i < nalak; i++) {
+        double d = 1e9; int c, bc = 0;
+        for (c = 0; c < k; c++) { double t; if (pal[c] < 0) continue; t = jdist(alakok[i].ft, alakok[pal[c]].ft); if (t < d) { d = t; bc = c; } }
+        alakok[i].pal = bc;
+    }
+    return k;
+}
+
+static void wav_fej(FILE *fo, long nout, int rate)
+{
+    fwrite("RIFF", 1, 4, fo); w32(fo, 36 + nout * 2); fwrite("WAVEfmt ", 1, 8, fo);
+    w32(fo, 16); w16(fo, 1); w16(fo, 1); w32(fo, rate); w32(fo, rate * 2); w16(fo, 2); w16(fo, 16);
+    fwrite("data", 1, 4, fo); w32(fo, nout * 2);
+}
+
+/* port-ertekek (0..15, TVC_FS) -> WAV 22050 Hz (tartott minta, mint a TVC DAC-ja) */
+static int port_wav(const char *path, const uint8_t *port, long nport)
+{
+    const int OUT = 22050;
+    long nout = (long)(nport * OUT / TVC_FS), t;
+    FILE *fo = fopen(path, "wb");
+    if (!fo) return 0;
+    wav_fej(fo, nout, OUT);
+    for (t = 0; t < nout; t++) {
+        long k = (long)(t * TVC_FS / OUT);
+        w16(fo, (int)((port[k < nport ? k : nport - 1] - 7.5) / 7.5 * 20000));
+    }
+    fclose(fo);
+    return 1;
+}
+
+/* a kepkocka indexe hurokkal kiterjesztve */
+static int kk(int f, int n, int loop) { return f < n ? f : (loop >= 0 ? loop + (f - n) % (n - loop) : f % n); }
+
+static void uj_hang(const Dump *dp, const All *T, const char *mappa, int song, int mem_n, int mem_loop)
+{
+    uint8_t regs[32];
+    Env env[3];
+    int n = dp->n, nf = uj_sec * 50, f, v, i, q, npal, pal[PAL_MAX];
+    UjH *H = xmalloc(sizeof(UjH) * 3 * nf);
+    uint8_t (*lvl)[3] = xmalloc(3 * (size_t)nf);
+    uint8_t *ofs = xmalloc(nf);
+    uint8_t *port = xmalloc((size_t)nf * IT_PER_FRAME);
+    double *G = xmalloc(sizeof(double) * nf);
+    char fajl[1200];
+    int var;
+    nalak = 0;
+    if (ahash) for (i = 0; i < ahmeret; i++) ahash[i].idx = -1;
+    memset(regs, 0, sizeof(regs));
+    memset(env, 0, sizeof(env));
+    for (v = 0; v < 3; v++) env[v].state = 2;
+    /* 1. kepkockankent a hangok (a tvc_allapotok logikaja, de a teljes SID-allapotbol). A memoria-hurok szerint
+          ismetlunk, a burkolo folyamatosan fut (a hang-hurok a regi, durva allapotbol szamol: lecsengo hangot
+          "kitartottnak" lathat). */
+    for (f = 0; f < nf; f++) {
+        int mid[3], vol, fcr, res, route, mode, sf = kk(f, mem_n, mem_loop);
+        for (i = 0; i < dp->k[sf].n; i++) {
+            int r = dp->k[sf].w[i].r, val = dp->k[sf].w[i].v;
+            regs[r] = (uint8_t)val;
+            if (r < 21) {
+                Env *e = &env[r / 7];
+                if (r % 7 == 4) env_control(e, val);
+                else if (r % 7 == 5) { e->a = val >> 4; e->d = val & 15; }
+                else if (r % 7 == 6) { e->s = val >> 4; e->r = val & 15; }
+            }
+        }
+        for (v = 0; v < 3; v++) {
+            env_run(&env[v], FRAME_CYC / 2);
+            mid[v] = env[v].lvl;
+            env_run(&env[v], FRAME_CYC - FRAME_CYC / 2);
+        }
+        vol = regs[24] & 15;
+        fcr = (regs[21] & 7) | (regs[22] << 3);
+        res = regs[23] >> 4; route = regs[23] & 7; mode = (regs[24] >> 4) & 7;
+        for (v = 0; v < 3; v++) {
+            int b = v * 7, src = (v + 2) % 3;
+            int F = regs[b] | (regs[b + 1] << 8), Fs = regs[src * 7] | (regs[src * 7 + 1] << 8);
+            int ctrl = regs[b + 4], wave = ctrl >> 4;
+            int pw = regs[b + 2] | ((regs[b + 3] & 15) << 8);
+            int ring = (ctrl & 4) && (wave & 1) && Fs > 0, sync = (ctrl & 2) && Fs > 0;
+            int rt = (route >> v) & 1, fb;
+            UjH *u = &H[f * 3 + v];
+            double a = mid[v] / 255.0 * vol / 15.0;
+            memset(u, 0, sizeof(UjH));
+            if ((ctrl & 8) || wave == 0 || F == 0 || a <= 0) continue;
+            if (v == 2 && (regs[24] & 0x80) && !rt) continue;      /* 3. hang ki */
+            if (rt && mode == 0) continue;
+            if (wave & 8) {                                        /* zaj: a fix zaj-tabla */
+                double s = 0; int j;
+                if (rt) {
+                    for (j = 1; j <= 24; j++) { double hr, hi; szuro(j * 100.0, fcr, res, mode, &hr, &hi); s += sqrt(hr * hr + hi * hi); }
+                    s /= 24; if (s > 1) s = 1;
+                } else s = 1;
+                u->tip = 3; u->a = a * s;
+                u->step = (int)(F * STEP_MUL + 0.5) / 16; if (u->step < 1) u->step = 1;
+                continue;
+            }
+            if (wave == 4 && !rt && !sync) {                       /* tiszta negyszog: PW-osszehasonlitas */
+                u->tip = 2; u->a = a; u->pw = pw >> 4;
+                u->step = (int)(F * STEP_MUL + 0.5);
+                continue;
+            }
+            fb = (sync || ring) ? (sync ? Fs : (Fs < F ? Fs : F)) : F;
+            u->tip = 1;
+            u->alak = alak_keres(wave & 7, ring, sync, F, Fs, fb, pw, rt, fcr, res, mode);
+            u->a = a * alakok[u->alak].p;
+            u->step = (int)(fb * STEP_MUL + 0.5);
+            alakok[u->alak].w += u->a;
+        }
+    }
+    for (i = 0; i < 3 * nf; i++) if (H[i].step > 0xFFFF) H[i].step = 0xFFFF;
+    /* 2. paletta */
+    npal = paletta(pal);
+    info("  uj hang: %d kulonbozo hangszin -> %d tablas paletta + zaj (%d byte)\n", nalak, npal, (npal + 1) * 256);
+    /* 3. hangero: C = mint most (hangonkent max 5), D = okos elosztas */
+    for (var = 0; var < 2; var++) {
+        uint16_t ph[3] = {0, 0, 0};
+        long pi = 0;
+        if (var == 1) {
+            /* a kepkocka kivant erositese: egy teljes hang = 15 szint; elore nezve lassan le, lassan fel */
+            const double LE = 0.06, FEL = 0.025;    /* log2 egyseg / kepkocka */
+            for (f = 0; f < nf; f++) {
+                double s = 0;
+                for (v = 0; v < 3; v++) s += H[f * 3 + v].a;
+                G[f] = s > 1 ? log2(1 / s) : 0;
+            }
+            for (f = nf - 2; f >= 0; f--) if (G[f] > G[f + 1] + LE) G[f] = G[f + 1] + LE;
+            for (f = 1; f < nf; f++) if (G[f] > G[f - 1] + FEL) G[f] = G[f - 1] + FEL;
+        }
+        for (f = 0; f < nf; f++) {
+            const UjH *u = &H[f * 3];
+            int L[3], sum = 0;
+            if (var == 0) {
+                for (v = 0; v < 3; v++) { int l = (int)(u[v].a * 5 + 0.5); L[v] = u[v].tip ? (l > 5 ? 5 : l) : 0; sum += L[v]; }
+                ofs[f] = 0;
+            } else {
+                double g = pow(2, G[f]) * 15, fr[3];
+                for (v = 0; v < 3; v++) { double x = u[v].tip ? u[v].a * g : 0; L[v] = (int)x; fr[v] = x - L[v]; sum += L[v]; }
+                while (sum > 15) { int m = 0; for (v = 1; v < 3; v++) if (L[v] > L[m]) m = v; L[m]--; sum--; }
+                for (;;) {           /* maradek: a legnagyobb tortresz kap, amig belefer */
+                    int m = -1; double bf = 0.5;
+                    for (v = 0; v < 3; v++) if (fr[v] >= bf) { bf = fr[v]; m = v; }
+                    if (m < 0 || sum >= 15) break;
+                    L[m]++; fr[m] = 0; sum++;
+                }
+                ofs[f] = (uint8_t)((15 - sum) / 2);
+            }
+            for (v = 0; v < 3; v++) lvl[f][v] = (uint8_t)L[v];
+            for (q = 0; q < IT_PER_FRAME; q++) {
+                int tot = ofs[f];
+                for (v = 0; v < 3; v++) {
+                    int hi, x;
+                    ph[v] = (uint16_t)(ph[v] + u[v].step);
+                    hi = ph[v] >> 8;
+                    switch (u[v].tip) {
+                    case 1: x = alakok[pal[alakok[u[v].alak].pal]].q[hi]; break;
+                    case 2: x = hi < u[v].pw ? 15 : 0; break;
+                    case 3: x = ZAJ[hi]; break;
+                    default: x = 0;
+                    }
+                    tot += (x * L[v] + 7) / 15;
+                }
+                port[pi++] = (uint8_t)(tot > 15 ? 15 : tot);
+            }
+        }
+        snprintf(fajl, sizeof(fajl), "%s/SONG%d_%s.WAV", mappa, song, var ? "D_hangero" : "C_paletta");
+        if (port_wav(fajl, port, pi)) info("  WAV: %s\n", fajl);
+    }
+    /* B = a mostani TVC-hang ugyanilyen hosszan */
+    {
+        All *E = xmalloc(sizeof(All) * 3 * nf);
+        for (f = 0; f < nf; f++) memcpy(&E[f * 3], &T[kk(f, n, dp->loop) * 3], sizeof(All) * 3);
+        snprintf(fajl, sizeof(fajl), "%s/SONG%d_B_most.WAV", mappa, song);
+        if (wav_ir(fajl, E, nf)) info("  WAV: %s\n", fajl);
+        free(E);
+    }
+    free(H); free(lvl); free(ofs); free(port); free(G);
+}
+
 /* ================================================================== egy aldal */
 static const char *nev_kapcsolo = NULL;     /* -n NEV */
 static int csak_mem = 0;                    /* -m: csak a memoria-hurok (a regi viselkedes) */
@@ -1065,6 +1438,7 @@ static int aldal(const SidFajl *s, const char *path, int song, const char *outdi
         snprintf(fajl, sizeof(fajl), "%s/SONG%d.WAV", mappa, song);
         if (wav_ir(fajl, T, dp.n)) info("  WAV: %s\n", fajl);
     }
+    if (uj_wav) uj_hang(&dp, T, mappa, song, mem_n, mem_loop < 0 ? -1 : mem_loop);
     for (f = 0; f < mem_n; f++) free(dp.k[f].w);
     free(dp.k);
     free(T);
@@ -1100,6 +1474,9 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-n") && i + 1 < argc) nev_kapcsolo = argv[++i];
         else if (!strcmp(argv[i], "-w")) wav = 1;
         else if (!strcmp(argv[i], "-m")) csak_mem = 1;
+        else if (!strcmp(argv[i], "-U")) uj_wav = 1;
+        else if (!strcmp(argv[i], "-t") && i + 1 < argc) uj_sec = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "-P") && i + 1 < argc) { pal_n = atoi(argv[++i]); if (pal_n < 1) pal_n = 1; if (pal_n > PAL_MAX) pal_n = PAL_MAX; }
         else if (!strcmp(argv[i], "-f") && i + 1 < argc) maxf = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-q")) csendes = 1;
         else if (!strcmp(argv[i], "-D") && i + 1 < argc) debug_ki = argv[++i];
