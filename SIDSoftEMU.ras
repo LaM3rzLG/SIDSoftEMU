@@ -628,8 +628,8 @@ begin
 		add	a,30			;	DC-kiegyenlites + GR16 modbit (kepkockankent irja a fo hurok)
 		out	($06),a
 		ld	e,a				;	keret = a kimenet szine ($EF00-s lap, a Jatszik tolti), de csak a kepkocka
-		ld	a,c				;	elso 16 IT-jeben (C' = 100..85): a 47. sor utan ~50 pontsor; maskor fekete
-		sub	85
+		ld	a,c				;	utolso 16 IT-jeben (C' = 16..1): a 0..47. sor, a szoveg mellett; maskor fekete
+		dec	a
 		cp	16
 		ld	a,0
 		jr	nc,SidKer
