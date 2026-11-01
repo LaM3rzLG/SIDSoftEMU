@@ -29,6 +29,18 @@ Testvérprojektek és minták: `../Ugh`, `../WaterPumpGame`.
   A `sid_tvc/<NÉV>/*.STC` fájlokat mindkét build magától a lemezre teszi (`SID_TVC\<NÉV>\`).
   A váz az Ugh-ból jött (`tvc_units/`, `resources/kozos.ps1`, `make_dsk.ps1`, `.vscode/tasks.json`).
 
+## KÖVETKEZŐ LÉPÉS (2026-11-01, a felhasználó kérése: ha azt kérdezi „mi a következő?”, EZZEL kezdünk)
+**Szebb hang csak a TVC saját 4 bites kimenetével** (SID-kártya NEM kell), a PC előre kiszámol mindent:
+1. **Dalonkénti hangszínpaletta:** a PC a valódi SID-hangot számolja (szűrő, kevert hullámformák, gyűrűmoduláció, PW),
+   dalonként 8–16 egyciklusú hangszín-táblát készít (256 B/tábla, 2–4 KB/dal), képkockánként a legközelebbit választja.
+   TVC: a tábla értéke 0–15, a hangerő egy MÁSODIK táblakereséssel (`ld e,a / ld d,SZINTLAP / ld a,(de)`, ~7% CPU).
+2. **Okos hangerő-elosztás:** a PC képkockánként osztja szét a DAC 16 szintjét a szóló hangok között (egy hang = mind a 16).
+3. (utána) **Dobok mintából:** a PC felismeri a dobütéseket, rövid 4 bites minták (1–3 KB/dal); 4. **tempó** a gyorsított
+   (CIA) zenéknél (lépés/s a fejlécben).
+Menet: MINDENT előbb a PC-n, WAV A/B-vel (valódi SID-referencia / mostani TVC / új TVC) - a felhasználó dönt, csak ami
+neki jobb, az megy a TVC-re. Az 1+2 együtt (ugyanaz a lejátszó-módosítás). A HVSC tömeges átalakítása (61 159 SID,
+~6–10 óra párhuzamosan) KÉSŐBBRE halasztva.
+
 ## Munkastílus
 Magyarul, tömören; a lemez az igazság; mentés = git (a felhasználó 2026-11-01: `.bak`-ok és átmeneti fájlok NEM kellenek); kétértelmű kérésnél az értelmezést egy
 mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
