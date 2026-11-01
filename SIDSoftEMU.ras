@@ -15,7 +15,7 @@ program SIDSoftEMU;
    - A keret fekete (a korabbi meres - IT piros, lejatszo zold - a felhasznalo kerese szerint kiveve, 2026-11-01).
    TILOS a fo programban lejatszas kozben: IX, IY, shadow regiszterek, ROM-hivas.
    MEMORIA: a REZIDENS resz (valtozok, GE unit, Betolt, Lejatszas, DalJatszas) vege = RezVege < $2300 kell (.sym)!
-   Lejatszas alatt a VID-ben var ($8A00-tol, max $BC00-ig = 12 800 byte): 1. RezVege..EndBlock19ef (a kod), 2. a font +
+   Lejatszas alatt a VID-ben var ($8C00-tol, max $BC00-ig = 12 288 byte): 1. RezVege..EndBlock19ef (a kod), 2. a font +
    logo ($5000-$6E42, fix cimen). A kod vege < $5000 kell! Lista $7000-$7FFF. Ellenorzes: build_mac.sh (utana). */
 
 var
@@ -23,6 +23,10 @@ var
 	Hiba		:	byte;									/* a betoltes eredmenye (0 = jo) */
 	JtHiba		:	byte;
 	FkFajl		:	array[80] of byte;						/* a lejatszando fajl: hossz + \UT\NEV.STC (a Betolt-nek) */
+	InfoVan		:	byte;									/* 1 = 1.1-es .STC: cim, szerzo, kiadas az INFO_CIM-en */
+	const INFO_CIM	: integer = $6F00;						/* 3 x 32 byte (a logo es a lista kozott; nem mentodik) */
+	InfoSor		:	array[34] of byte;
+	PerJel		:	array[2] of byte = (92, 0);				/* "\" (a TRSE-szovegben a \ nem irhato) */
 	/* a font es a forgo logo (maszkolt GE sprite 6 x 17, 16 fazis) FIX cimen, a kod moge ($5000-$6E42): a valtozok kozott
 	   a $2300 alatti (rezidens) reszt toltenek ki. Lejatszas alatt a VID-be mentodnek (DalJatszas). */
 	Font16_Data	:	incbin("resources/font16_kek_cian.bin", $5000);			/* 4470 byte */
@@ -40,7 +44,7 @@ var
 	const ALLAPOT_Y	: byte = 200;		/* uzenetsor */
 	const NEV_X		: byte = 3;			/* oszlopok (byte = 4 pont) */
 	const MERET_JOBB: byte = 54;		/* a meret jobb szele */
-	const KVT_X		: byte = 36;
+	const KVT_X		: byte = 39;		/* a <Konyvtar> jobb szele = a KB jobb szele (61) */
 
 	/* Lista: $7000-$7FFF (256 bejegyzes x 16: nev 8, kit. 3, attr 1, meret 4) */
 	MintaFcb	:	array[64] of byte;		/* keresesi minta (????????.???) */
@@ -90,6 +94,20 @@ begin
 		rst	$30
 		db	$D2					;	CAS_BKIN
 		ld	hl,(BtHossz)
+		ld	a,h
+		and	l
+		inc	a
+		jr	nz,BtRegi			;	nem $FFFF: 1.0-s fajl
+		ld	de,$8000			;	1.1: az info-blokk (96 byte) atugrasa (U2, a dal ugyis felulirja)
+		ld	bc,96
+		rst	$30
+		db	$D2
+		ld	de,BtHossz
+		ld	bc,2
+		rst	$30
+		db	$D2
+		ld	hl,(BtHossz)
+	BtRegi:
 		ld	de,$C000-$2300		;	a $2300-$BFFF resz hossza
 		or	a
 		sbc	hl,de
@@ -637,15 +655,16 @@ end;
 
 /* ---------------------------------------------------------------- dal lejatszasa (REZIDENS: a RezVege elott kell lennie)
    A dal $2300-tol tolt, ez felulirja a program felso reszet (RezVege-tol a program vegeig: fajlkezelo, font, logo,
-   foprogram). Ezert elotte ezt a reszt a kepmemoriaba (VID $0A00-tol = $8A00, $50 lapozassal) mentjuk; a kepbol
-   addig csak a felso 24 pontsor latszik (CRTC R6 = 6: nev, konyvtar, a logo 0. fazisa). A vegen vissza, a kep alja ($8A00-$BBFF) fekete, R6 = 60.
+   foprogram). Ezert elotte ezt a reszt a kepmemoriaba (VID $0C00-tol = $8C00, $50 lapozassal) mentjuk; a kepbol
+   addig csak a felso 48 pontsor latszik (CRTC R6 = 12: cim, szerzo, kiadas, konyvtar\\fajl, a logo 0. fazisa).
+   A vegen vissza, a kep alja ($8C00-$BBFF) fekete, R6 = 60.
    A font + logo ($5000-tol) a kod utan mentodik. A betolteshez $70 lapozas kell (a $C000 feletti resz a $8000-ra = U2 jon). A fajlnev: FkFajl (hossz + ut). */
 procedure DalJatszas();
 begin
 	asm("
-		ld	a,6					;	CRTC R6: csak a felso 24 pontsor latszik (a mentes helye nem)
+		ld	a,6					;	CRTC R6: csak a felso 48 pontsor latszik (a mentes helye nem)
 		out	($70),a
-		ld	a,6
+		ld	a,12
 		out	($71),a
 		call	DjMent
 		ld	a,$70				;	U0,U1,U2,SYS
@@ -669,7 +688,7 @@ begin
 		out	($02),a
 		call	DjHossz
 		ld	hl,RezVege			;	1. a kod (RezVege..a program vege)
-		ld	de,$8A00
+		ld	de,$8C00
 		ldir
 		call	DjAdatHossz
 		ld	hl,Font16_Data		;	2. az adat (font + logo), utana
@@ -684,15 +703,15 @@ begin
 		ld	($0003),a
 		out	($02),a
 		call	DjHossz
-		ld	hl,$8A00
+		ld	hl,$8C00
 		ld	de,RezVege
 		ldir
 		call	DjAdatHossz
 		ld	de,Font16_Data
 		ldir
-		ld	hl,$8A00			;	a kep alja (a mentes helye) fekete
-		ld	de,$8A01
-		ld	bc,$BBFF-$8A00
+		ld	hl,$8C00			;	a kep alja (a mentes helye) fekete
+		ld	de,$8C01
+		ld	bc,$BBFF-$8C00
 		ld	(hl),0
 		ldir
 		ei
@@ -1499,6 +1518,72 @@ begin
 end;
 
 
+/* a .STC info-blokkja (1.1: $FF $FF + cim, szerzo, kiadas 3 x 32 byte) -> INFO_CIM, InfoVan. Firmware IT kell! */
+procedure InfoOlvas();
+begin
+	asm("
+		xor	a
+		ld	(InfoVan),a
+		ld	($0B0A),a
+		ld	a,($0003)
+		push	af
+		ld	a,$70
+		ld	($0003),a
+		out	($02),a
+		ld	de,FkFajl
+		rst	$30
+		db	$D3					;	CAS_OPEN, Z = ok
+		jr	nz,IoVege
+		ld	de,$6F60			;	a jelolo KULON helyre: ket azonos ld de,X kozul a TRSE optimalizaloja a masodikat kidobja!
+		ld	bc,2
+		rst	$30
+		db	$D2
+		ld	hl,($6F60)
+		ld	a,h
+		and	l
+		inc	a
+		jr	nz,IoZar			;	1.0-s fajl: nincs info
+		ld	de,$6F00
+		ld	bc,96
+		rst	$30
+		db	$D2
+		ld	a,1
+		ld	(InfoVan),a
+	IoZar:
+		xor	a
+		rst	$30
+		db	$D4					;	zaras
+	IoVege:
+		pop	af
+		ld	($0003),a
+		out	($02),a
+	");
+end;
+
+
+/* egy 0-val zart szoveg a yy sorba, a logo elott (legfeljebb 55 byte szelesen: a vegebol levagva) */
+procedure SorKi(yy : byte; forras : ^byte);
+begin
+	i := 0;
+	while (i < 32) do
+	begin
+		InfoSor[i] := forras[i];
+		if (forras[i] = 0) then i := 32
+		else i := i + 1;
+	end;
+	InfoSor[32] := 0;
+	Ir16_Hossza(#InfoSor);
+	i := 32;
+	while (Ir16_Hossz > 55) do
+	begin
+		i := i - 1;
+		InfoSor[i] := 0;
+		Ir16_Hossza(#InfoSor);
+	end;
+	Ir16(2, yy, #InfoSor);
+end;
+
+
 /* a kijelolt .STC lejatszasa (a nev a Nev-ben): FkFajl = hossz + ut + \ + nev; lejatszas utan a lista ujra */
 procedure Jatszik();
 begin
@@ -1523,11 +1608,20 @@ begin
 		j := j + 1;
 	end;
 	FkFajl[0] := k - 1;
-	/* lejatszas alatt csak a felso 24 pontsor latszik: a fajl neve, a konyvtara, jobbra a logo 0. fazisa */
+	/* lejatszas alatt csak a felso 48 pontsor latszik: cim, szerzo, kiadas, konyvtar\fajl; jobbra a logo 0. fazisa */
 	GE::EnableTVCITHandler();		/* a logo-IT itt all le (a betolteshez a firmware IT kell) */
-	GE::FillRect(0, 0, 64, 24, 0);
+	InfoOlvas();
+	GE::FillRect(0, 0, 64, 48, 0);
 	LogoFazis0();
-	Ir16(2, 2, #Nev);
+	if (InfoVan = 1) then
+	begin
+		p := INFO_CIM;
+		SorKi(2, p);
+		p := INFO_CIM + 32;
+		SorKi(13, p);
+		p := INFO_CIM + 64;
+		SorKi(24, p);
+	end;
 	k := 0;							/* a konyvtar = az ut utolso tagja */
 	j := 0;
 	while (j < UtHossz) do
@@ -1538,7 +1632,9 @@ begin
 	if (k >= UtHossz) then k := 0;	/* gyoker: \ */
 	p := #Ut;
 	p := p + k;
-	Ir16(2, 13, p);
+	Ir16(2, 35, p);
+	Ir16(Ir16_X, 35, #PerJel);
+	Ir16(Ir16_X, 35, #Nev);
 	DalJatszas();
 	asm("
 	JtElenged:

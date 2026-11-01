@@ -21,7 +21,9 @@
  *      ahol a memoria sosem ismetlodik); a kettobol a rovidebb dal nyer.
  *   4. Tomorites hangonkent (rekord / varakozas / REF visszahivatkozas), a hurokpontra ugro VEGE-vel.
  *
- * A .STC formatum: 2 byte hossz (L), majd a dal $C000 feletti resze, vegul a SONG_BASE..$BFFF resz.
+ * A .STC formatum (1.1): $FF $FF, 3 x 32 byte info (cim, szerzo, kiadas; 0-val zarva, a TVC-s fontban
+ * nem levo jelek szokozre csereve), majd 2 byte hossz (L), a dal $C000 feletti resze, vegul a SONG_BASE..$BFFF resz.
+ * (Az 1.0-s fajl az L-lel kezdodik; L sosem $FFFF, igy a TVC mindkettot felismeri.)
  * A dal (SONG_BASE-tol): 6 byte fejlec (a 3 hang folyamanak cime), hangonkent kepkockankent egy rekord:
  *   c = $00..$0F  bit 0 = lepes (2 byte), bit 1 = lepes += elojeles byte, bit 2 = szelet (1 byte: < $80 tablalap
  *                 0..15, >= $80 negyszog, szint = also 3 bit), bit 3 = PW (1 byte)
@@ -44,7 +46,7 @@
 #define MKDIR(p) mkdir((p), 0755)
 #endif
 
-#define VERZIO "1.0"
+#define VERZIO "1.1"
 
 /* ------------------------------------------------------------------ TVC-oldali allandok */
 #define SONG_BASE   0x2300              /* a dal cime a TVC-n */
@@ -544,6 +546,20 @@ static int dump(const SidFajl *s, int song, int maxf, Dump *dp, char *hibaszoveg
 
 static void w16(FILE *f, int v) { fputc(v & 0xFF, f); fputc((v >> 8) & 0xFF, f); }
 
+/* egy info-mezo (32 byte): 31 jel + 0. Megmarad: ASCII 32..122 es a Latin-1 ekezetes betuk (>= $C0, a TVC-s Ir16
+   ezeket ismeri); minden mas -> szokoz. */
+static void info_ir(FILE *f, const char *t)
+{
+    unsigned char o[32];
+    int i;
+    memset(o, 0, sizeof(o));
+    for (i = 0; i < 31 && t[i]; i++) {
+        unsigned char c = (unsigned char)t[i];
+        o[i] = ((c >= 32 && c <= 122) || c >= 0xC0) ? c : ' ';
+    }
+    fwrite(o, 1, 32, f);
+}
+
 /* ================================================================== 2. SID-burkolo */
 typedef struct { int lvl, state, rc, ec, a, d, s, r, gate; } Env;   /* state: 0 A, 1 D, 2 R */
 
@@ -1035,6 +1051,10 @@ static int aldal(const SidFajl *s, const char *path, int song, const char *outdi
     if (!fo) { fprintf(stderr, "\nnem irhato: %s\n", fajl); return 0; }
     {
         int split = 0xC000 - SONG_BASE;
+        w16(fo, 0xFFFF);                        /* 1.1: info-blokk */
+        info_ir(fo, s->name);
+        info_ir(fo, s->author);
+        info_ir(fo, s->released);
         w16(fo, blob.n);
         if (blob.n > split) fwrite(blob.b + split, 1, blob.n - split, fo);
         fwrite(blob.b, 1, blob.n < split ? blob.n : split, fo);

@@ -55,8 +55,10 @@ Nem kezeli (egyelőre): többszörös sebességű (CIA-val gyorsított) dalok, d
 
 ## A .STC formátum
 
-2 bájt hossz (L), majd a dal `$C000` feletti része, végül a `$2300..$BFFF` rész (így a TVC ROM-jával
-egyszerűen betölthető). A dal `$2300`-tól: 6 bájtos fejléc (a 3 hang folyamának címe), majd hangonként
+**1.1 (2026-11-01):** `$FF $FF`, aztán 3 × 32 bájt info a .sid fejlécéből: cím, szerző, kiadás (31 jel + 0; ami a
+TVC-s fontban nincs, az szóköz). Utána ugyanaz, mint az 1.0-ban: 2 bájt hossz (L), a dal `$C000` feletti része, végül a
+`$2300..$BFFF` rész (így a TVC ROM-jával egyszerűen betölthető). Az 1.0-s fájl az L-lel kezdődik (L sosem `$FFFF`), a
+SIDSoftEMU mindkettőt lejátssza; az infót (cím, szerző, kiadás) lejátszás közben kiírja. A dal `$2300`-tól: 6 bájtos fejléc (a 3 hang folyamának címe), majd hangonként
 képkockánként egy rekord:
 
 | Kód | Jelentés |
