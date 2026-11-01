@@ -15,7 +15,7 @@ program SIDSoftEMU;
    - A keret fekete (a korabbi meres - IT piros, lejatszo zold - a felhasznalo kerese szerint kiveve, 2026-11-01).
    TILOS a fo programban lejatszas kozben: IX, IY, shadow regiszterek, ROM-hivas.
    MEMORIA: a REZIDENS resz (valtozok, GE unit, Betolt, Lejatszas, DalJatszas) vege = RezVege < $2300 kell (.sym)!
-   Lejatszas alatt a VID-ben var ($8C00-tol, max $BC00-ig = 12 288 byte): 1. RezVege..EndBlock19ef (a kod), 2. a font +
+   Lejatszas alatt a VID-ben var ($8C00-tol, max $C000-ig = 13 312 byte; a kep alatti 1 KB is): 1. RezVege..EndBlock19ef (a kod), 2. a font +
    logo ($5000-$6E42, fix cimen). A kod vege < $5000 kell! Lista $7000-$7FFF. Ellenorzes: build_mac.sh (utana). */
 
 var
@@ -25,7 +25,9 @@ var
 	FkFajl		:	array[80] of byte;						/* a lejatszando fajl: hossz + \UT\NEV.STC (a Betolt-nek) */
 	InfoVan		:	byte;									/* 1 = 1.1-es .STC: cim, szerzo, kiadas az INFO_CIM-en */
 	const INFO_CIM	: integer = $6F00;						/* 3 x 32 byte (a logo es a lista kozott; nem mentodik) */
-	InfoSor		:	array[34] of byte;
+	InfoSor		:	array[34] of byte;						/* SorKi; NanoSD-nel a lista egy bejegyzese (17 byte) is */
+	Eszkoz		:	byte = 0;								/* 0 = lemez (VT-DOS, FISH), 1 = NanoSD */
+	NsPort, NsSt, NsKod	:	byte = 0;							/* a NanoSD portja ($10 x (foglalat + 1)), allapot, parancs */
 	PerJel		:	array[2] of byte = (92, 0);				/* "\" (a TRSE-szovegben a \ nem irhato) */
 	/* a font es a forgo logo (maszkolt GE sprite 6 x 17, 16 fazis) FIX cimen, a kod moge ($5000-$6E42): a valtozok kozott
 	   a $2300 alatti (rezidens) reszt toltenek ki. Lejatszas alatt a VID-be mentodnek (DalJatszas). */
@@ -1378,7 +1380,7 @@ end;
 
 
 /* ---------------------------------------------------------------- konyvtar beolvasasa -> Lista, Db */
-procedure Olvas();
+procedure FishOlvas();
 begin
 	Db := 0;
 	MintaFcb[0] := $FF;
@@ -1424,6 +1426,229 @@ begin
 	end;
 	HibaKod := FishHiba;
 	LogoITBe();		/* a GE::DisableTVCITHandler helyett: a sajat megszakitas (logo) */
+end;
+
+
+/* ---------------------------------------------------------------- NanoSD (Vass Sandor / dikdom; protokoll: a FreeTVC
+   docs/design/cards.md "NanoSD" + src/core/cards/nanosd.cpp). A kartya ROM-ja a kazetta-osztalyt veszi at, ezert ha bent
+   van, a betoltes (CAS_OPEN/BKIN) is rajta megy -> a listat is tole kerjuk. A foglalat minden portja ugyanaz a regiszter:
+   OUT = byte a Nano-nak; IN = amit a Nano az ELOZO olvasas utan tett ki (allapot, ha b7 = 1, kulonben a kovetkezo
+   adat). Az OUT utani elso IN elavult, eldobjuk. Parancsok: 02h CHDIR nev 00h -> 8Ch ok; 03h LIST -> bejegyzesenkent
+   00h + 17 byte (12 byte "NEV.KIT" szokozzel, tipus 0 = konyvtar, meret 4 byte), 04h = kovetkezo; vege 84h. */
+
+/* NsPort := a NanoSD portja, 0 = nincs. A 4 foglalat IOMEM-jeben ($C000, 2-es port = $D0, 3-as port bit 6-7 = foglalat)
+   a ROM fejlece: "MOPS", 6, "NANOSD". */
+procedure NsKeres();
+begin
+	asm("
+		xor	a
+		ld	(NsPort),a
+		di
+		ld	b,0					;	foglalat
+	NkKov:
+		ld	a,($0B11)			;	a 3-as port arnyeka
+		and	$3F
+		ld	c,a
+		ld	a,b
+		rrca
+		rrca
+		or	c
+		out	($03),a
+		ld	a,$D0				;	U0, U1, VID, IOMEM
+		out	($02),a
+		ld	hl,$C004
+		ld	de,NkNev
+		ld	c,7
+	NkHas:
+		ld	a,(de)
+		cp	(hl)
+		jr	nz,NkNem
+		inc	hl
+		inc	de
+		dec	c
+		jr	nz,NkHas
+		ld	a,b					;	megvan: port = $10 x (foglalat + 1)
+		inc	a
+		rlca
+		rlca
+		rlca
+		rlca
+		ld	(NsPort),a
+		jr	NkVege
+	NkNem:
+		inc	b
+		ld	a,b
+		cp	4
+		jr	nz,NkKov
+	NkVege:
+		ld	a,($0B11)
+		out	($03),a
+		ld	a,($0003)
+		out	($02),a
+		ei
+		jr	NkKi
+	NkNev:
+		db	6,$4E,$41,$4E,$4F,$53,$44
+	NkKi:
+	");
+end;
+
+
+/* parancs-byte (NsKod) a Nano-nak, ~100 us varakozas, az elavult valasz eldobasa */
+procedure NsParancs(NsKod : global byte);
+begin
+	asm("
+		ld	a,(NsPort)
+		ld	c,a
+		ld	a,(NsKod)
+		out	(c),a
+		ld	b,30
+	NpVar:
+		djnz	NpVar
+		in	a,(c)
+	");
+end;
+
+
+/* az FkFajl 0-val zart szovege (a 0-val egyutt) a Nano-nak */
+procedure NsSzoveg();
+begin
+	asm("
+		ld	a,(NsPort)
+		ld	c,a
+		ld	hl,FkFajl
+	NszKov:
+		ld	a,(hl)
+		out	(c),a
+		ld	b,6
+	NszVar:
+		djnz	NszVar
+		inc	hl
+		or	a
+		jr	nz,NszKov
+	");
+end;
+
+
+/* a Nano valasza -> NsSt: var, amig 80h (meg nem kesz) vagy 81h (bemenetre var); idotullepes: FEh */
+procedure NsAllapot();
+begin
+	asm("
+		ld	a,(NsPort)
+		ld	c,a
+		ld	de,0
+	NaKov:
+		in	a,(c)
+		cp	$80
+		jr	z,NaUjra
+		cp	$81
+		jr	nz,NaKesz
+	NaUjra:
+		dec	de
+		ld	a,d
+		or	e
+		jr	nz,NaKov
+		ld	a,$FE
+	NaKesz:
+		ld	(NsSt),a
+	");
+end;
+
+
+/* egy LIST-bejegyzes 17 byte-ja -> InfoSor */
+procedure NsBejegyzes();
+begin
+	asm("
+		ld	a,(NsPort)
+		ld	c,a
+		ld	hl,InfoSor
+		ld	b,17
+	NbKov:
+		in	a,(c)
+		ld	(hl),a
+		inc	hl
+		djnz	NbKov
+	");
+end;
+
+
+/* a konyvtar beolvasasa a NanoSD-rol -> Lista, Db (CHDIR az Ut-ra, / jelekkel; aztan LIST) */
+procedure NsOlvas();
+begin
+	Db := 0;
+	j := 0;
+	while (j < UtHossz) do
+	begin
+		b := Ut[j];
+		if (b = 92) then b := 47;
+		FkFajl[j] := b;
+		j := j + 1;
+	end;
+	FkFajl[j] := 0;
+	NsParancs(2);
+	NsSzoveg();
+	NsAllapot();
+	if (NsSt <> $8C) then
+	begin
+		HibaKod := NsSt;
+		return;
+	end;
+	NsParancs(3);
+	NsAllapot();
+	while (NsSt = 0) do
+	begin
+		NsBejegyzes();
+		BejCim(Db);
+		/* "NEV.KIT" -> nev 8 + kit. 3, szokozzel */
+		k := 0;
+		i := 0;
+		while (k < 8) do
+		begin
+			b := InfoSor[i];
+			if ((b = 46) or (b = 32)) then b := 32
+			else i := i + 1;
+			p[k] := b;
+			k := k + 1;
+		end;
+		if (InfoSor[i] = 46) then i := i + 1;
+		while (k < 11) do
+		begin
+			b := 32;
+			if (i < 12) then b := InfoSor[i];
+			if (b <> 32) then i := i + 1;
+			p[k] := b;
+			k := k + 1;
+		end;
+		p[11] := 0;
+		if (InfoSor[12] = 0) then p[11] := 16;
+		p[12] := InfoSor[13];
+		p[13] := InfoSor[14];
+		p[14] := InfoSor[15];
+		p[15] := InfoSor[16];
+		Db := Db + 1;
+		if (Db = 255) then
+		begin
+			NsParancs(1);		/* nem ACK: a lista vege (a Nano elnyeli) */
+			NsSt := $84;
+		end
+		else
+		begin
+			NsParancs(4);		/* ACK_LIST: a kovetkezo */
+			NsAllapot();
+		end;
+	end;
+	HibaKod := NsSt;			/* 84h = rendben vege */
+	if (NsSt = $84) then HibaKod := 0;
+end;
+
+
+/* ---------------------------------------------------------------- konyvtar beolvasasa: NanoSD vagy lemez */
+procedure Olvas();
+begin
+	if (Eszkoz = 1) then
+		NsOlvas()
+	else
+		FishOlvas();
 	if (Sel >= Db) then
 	begin
 		Sel := 0;
@@ -1589,6 +1814,7 @@ procedure Jatszik();
 begin
 	k := 1;
 	j := 0;
+	if (Eszkoz = 1) then j := 255;	/* NanoSD: csak a nev (az aktualis konyvtar a CHDIR-bol) */
 	while (j < UtHossz) do
 	begin
 		FkFajl[k] := Ut[j];
@@ -1596,10 +1822,11 @@ begin
 		j := j + 1;
 	end;
 	if (UtHossz > 1) then
-	begin
-		FkFajl[k] := 92;
-		k := k + 1;
-	end;
+		if (Eszkoz = 0) then
+		begin
+			FkFajl[k] := 92;
+			k := k + 1;
+		end;
 	j := 0;
 	while (j < NevHossz) do
 	begin
@@ -1747,6 +1974,8 @@ begin
 	Ut[1] := 0;
 	UtHossz := 1;
 	GE::ClearScreen(GE::GR16_COLOR_BLACK);
+	NsKeres();
+	if (NsPort <> 0) then Eszkoz := 1;
 	LogoIndit();
 	UjKonyvtar();
 

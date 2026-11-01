@@ -47,6 +47,17 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   ESC, könyvtárváltás, logó forog lejátszás után. Lejátszás alatt a logó áll (a hang-IT fut). Windows: a build.ps1-ben
   nincs memória-ellenőrzés.
 
+## NanoSD (2026-11-01, freeTVC-ben kipróbálva: lista, LN1/5 és LN2/10 bájtra, info; a lemezes mód is megy)
+- Indításkor `NsKeres`: a 4 foglalat IOMEM-jében ($C000, port 2 = $D0, port 3 bit 6-7 = foglalat) a „MOPS 6 NANOSD” fejléc
+  -> `NsPort` = $10 × (foglalat+1), `Eszkoz` = 1. Ekkor a lista a Nano saját parancsaival: CHDIR (02h, út `/`-rel, 00h) ->
+  8Ch, LIST (03h) -> bejegyzésenként 00h + 17 bájt („NEV.KIT” 12, típus 0 = könyvtár, méret 4), ACK 04h, vége 84h; az OUT
+  utáni első IN elavult. A betöltés a ROM CAS-hívásaival megy (a NanoSD ROM-ja átveszi), a fájlnév csak `SONGn.STC` (relatív).
+  Forrás: FreeTVC `docs/design/cards.md` „NanoSD” + `src/core/cards/nanosd.cpp`. Valódi NanoSD-n még NINCS kipróbálva.
+- A build `SD_KARTYA/` mappát is ír (SIDSOFT.CAS + SID_TVC, minden dal) - ezt kell a kártyára másolni. A NanoSD a
+  kártya (FAT) sorrendjében listáz; freeTVC-ben név szerint (SONG1, SONG10, SONG11, SONG2...).
+- freeTVC NanoSD-próba: `./freetvc --nanosd --nanosd-sd <mappa> --mcp-http ...`, a `freetvc.ini`-ben `disk_card = no`
+  (utána vissza!); a NanoSD menüjében Enter a SIDSOFT.CAS-on. Mentés a VID-ben most max $C000-ig (13 312 B).
+
 ## SID-fájl lejátszás (2026-10-31, ep128emu-ben fut; a felhasználó: "működik, elég jól szól, lehetne jobb" - szünet)
 - `sid/Last_Ninja.sid` (HVSC, 11 aldal). PC: `python3 tools/sid2tvc.py sid/Last_Ninja.sid <aldal>` = 6502-emu
   (`tools/m6502.py`, `sid_dump.py`: hurok a teljes memória ismétlődéséből) -> SID-ADSR szimuláció -> hangonként
