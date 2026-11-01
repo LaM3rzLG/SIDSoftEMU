@@ -39,7 +39,7 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   (lépés, szelet, PW) -> hangonként külön, visszahivatkozásos (REF) folyam -> `dalok/DALnn.BIN` + pontos WAV
   `hang_minta/Last_Ninja_<n>_tvc.wav`. Formátum a `sid2tvc.py` fejében.
 - **A felhasználó döntése: a dalok lemezfájlból töltődnek** (aldalanként egy fájl), nem a programba fordítva.
-- TVC (`SIDSoftEMU.ras`, a régi 4 változatos teszt: `.bak_teszt4`): menü ROM-mal (1-9, 0=10, A=11) -> betöltés
+- TVC (`SIDSoftEMU.ras`, a régi 4 változatos teszt: git `2f353c6:SIDSoftEMU.ras.bak_teszt4`): menü ROM-mal (1-9, 0=10, A=11) -> betöltés
   (Lemmings-sorrend; a $C000 feletti rész előbb $8000-ra, onnan U3-ba) -> lejátszás **$B0 lapozással (teljes 64K
   RAM)**, dal $4000-tól (max 44800 B), táblák $EF00-$FFFF; bármely gomb = vissza a ROM-nak ($38 = F5 3E 70,
   port 5, CRTC R10/R11 = 3) és a menübe. Dekódoló asm-ben: zöld sáv ~2-3%.
@@ -85,6 +85,8 @@ mondatban kimondani; a felhasználó tesztel; a CLAUDE.md-t frissíteni.
   Előbb a szöveg téglalapja fekete, aztán betűnként minden sor OR-ral a képre; páratlan pontnál bal pont >>1 (bit 7,5,3,1
   -> 6,4,2,0), jobb pont <<1 a következő byte-ba. ~99 000 T egy 22 betűs sorra (menühöz elég). Build:
   `bash resources/build_ir16teszt_mac.sh`, `load"IR16TESZ"`. A fontban a „C”-n 9/10-es színű pontok vannak (a rajzban).
+- **FajlTeszt16 = VÉGLEGES (2026-11-01, git címke `fajlteszt16-kesz`; a felhasználó: "jól működik").** A .bak-ok és átmeneti
+  fájlok törölve (a régiek a git előzményekben).
 - **FajlTeszt16 (2026-10-31, freeTVC-ben kipróbálva):** a FajlTeszt GRAPHICS16-ban, Ir16 + font16.bin; 14 sor, sorköz 12,
   oszlop = byte = 2 pont; build `bash resources/build_fajlteszt16_mac.sh`, `load"FAJLT16"`. freeTVC: `--disk-card --disk-rom 1.2`
   kell (a HBF-ROM-mal a FISH-lista üres, hiba 255).
