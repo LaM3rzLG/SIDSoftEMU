@@ -13,17 +13,5 @@ __pycache__/
 tools/sid2tvc/sid2tvc
 tools/sid2tvc/sid2tvc.exe
 SIDSOFT2.dsk
-FajlTeszt.asm
-FajlTeszt.bin
-FajlTeszt.sym
-FajlTeszt.dsk
-Ir16Teszt.asm
-Ir16Teszt.bin
-Ir16Teszt.sym
-Ir16Teszt.dsk
-FajlTeszt16.asm
-FajlTeszt16.bin
-FajlTeszt16.sym
-FajlTeszt16.dsk
 SD_KARTYA/
 tools/sid_ref/sid_ref

@@ -159,32 +159,9 @@ asm-ben a `p` változónév nem használható (feltételkód).
   CRTC R6 = 10 (csak a felső 4 szöveges sor látszik), utána vissza. Lista: $6000, FCB-k $7000/$7040, FPB $7080.
   Kipróbálva: könyvtárváltás, LN1/5 (47 KB) bájtra egyezik, LN3/1, LN2/4 szól, vissza a listába, ESC, nem .STC üzenet.
   Valódi gépen (SD) a FISH-hívás még NINCS kipróbálva - ha ott nem megy, a lista üres/hibakód.
-- **FajlTeszt (2026-10-31, ep128emu-ben kipróbálva) - a fájlkezelő új változata KÜLÖN próbaprogramban** (a felhasználó
-  kérése: "kegyetlen lassú", TRSE-ben, GE/TVC unittal). `FajlTeszt.ras`: Pascal + GE (FillRect, GetKeyboard/Pressed, a nyilak
-  = `JOY1_*`); FISH-hívás asm-ben. **Szöveg: a WaterPumpGame saját arányos kiírója (`Ir`, `Ir_Hossza`) változatlanul +
-  a felhasználó `resources/font.bin`-je** (NEM GE::WriteText - az fix szélességű). Ékezet Latin-1-gyel, ő/ű helyett ô/û.
-  Build: `bash resources/build_fajlteszt_mac.sh`, lemez `FajlTeszt.dsk`, `load"FAJLTESZ"`. Könyvtárváltás ~0,1 s (ROM-os
-  kiírással ~1 s volt). Enter .STC-n most csak kiírja (Szólna: név). A SIDSoftEMU-ba még NINCS átvéve.
-- **Ir16Teszt (2026-10-31, freeTVC-ben kipróbálva) - 16 színű arányos kiíró** a WPG `Ir` mintájára, GRAPHICS16-ban:
-  `Ir16(x byte, y sor, szöveg)`, `Ir16_Hossza`, `Ir16_Kozep`; font `resources/font16.bin` (charset16_szerkeszto, h = 10).
-  Előbb a szöveg téglalapja fekete, aztán betűnként minden sor OR-ral a képre; páratlan pontnál bal pont >>1 (bit 7,5,3,1
-  -> 6,4,2,0), jobb pont <<1 a következő byte-ba. ~99 000 T egy 22 betűs sorra (menühöz elég). Build:
-  `bash resources/build_ir16teszt_mac.sh`, `load"IR16TESZ"`. A fontban a „C”-n 9/10-es színű pontok vannak (a rajzban).
-- **FajlTeszt16 = VÉGLEGES (2026-11-01, git címke `fajlteszt16-kesz`; a felhasználó: "jól működik").** A .bak-ok és átmeneti
-  fájlok törölve (a régiek a git előzményekben).
-- **FajlTeszt16 (2026-10-31, freeTVC-ben kipróbálva):** a FajlTeszt GRAPHICS16-ban, Ir16 + font16.bin; 14 sor, sorköz 12,
-  oszlop = byte = 2 pont; build `bash resources/build_fajlteszt16_mac.sh`, `load"FAJLT16"`. freeTVC: `--disk-card --disk-rom 1.2`
-  kell (a HBF-ROM-mal a FISH-lista üres, hiba 255).
-  Kiemelő sáv: sötétkék (szín 1), CSÚSZIK a szomszédos sorra (`Csusztat` + asm `SavSor`, képkockánként 3 pontsor = 4 kép).
-  A háttér mindig fekete, ezért a képpont maga a maszk: sáv be = 0 -> 1, sáv ki = 1 -> 0 (a fontban nincs 1-es szín), a betű
-  pontjai sosem változnak (az OR-os változat elszínezte a 8/10-es pontokat - a felhasználó "csúnya"-nak ítélte). Lapozás: azonnal.
-  Font most: `resources/font16_kek_cian.bin` (cián + sötétkék árnyék; forrás TVC_Kozos/tools/Fontok). A sáv színe `SAV_SZIN`
-  (most sötétlila), olyan szín kell, ami NINCS a fontban (ez a font: 0,1,5,8,9,10,13).
-  Forgó C64-logó a jobb felső sarokban (x 57, y 3), **MEGSZAKÍTÁSBÓL** (a felhasználó kérése: nem állhat le): `LogoITBe` a $38-ra
-  JP LogoIT-t ír (a GE::DisableTVCITHandler helyett, az Olvas végén is), 3 képkockánként a következő fázis adat-byte-jai a képre
-  (fix fekete háttér -> maszk nem kell). Csúszás, könyvtárváltás közben is forog (a FISH alatt a firmware IT fut, ~1 fázis).
-  Adat: `resources/images/C64_logo_forog.bin` (maszkolt GE sprite 6x17, 16 fázis) = `python3 tools/bmp2ge.py resources/images
-  resources/images/C64_logo_forog.bin` a `c64_symbol_1..16.bmp`-kből (a felhasználó a BMP-ket frissíti).
+- **A próbaprogramok (FajlTeszt, Ir16Teszt, FajlTeszt16) 2026-11-02 óta KÜLÖN privát repóban:** `../FajlTeszt`
+  (https://github.com/LaM3rzLG/FajlTeszt; a felhasználó kérése). Itt a régi állapot a `fajlteszt16-kesz` címkén. A tudásanyag
+  a közös skillekben: **tvc-fajlkezeles**, **tvc-grafika**. A forgó logó BMP-i és a `tools/bmp2ge.py` itt maradtak.
 - Folytatási ötletek: hangminőség (szűrő közelítése táblával, finomabb szintek/keverés, zaj), 5. aldal
   tömörítése, más .sid-ek kipróbálása, dal neve a fájlból a menüben.
 
