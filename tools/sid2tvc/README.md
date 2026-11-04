@@ -20,7 +20,7 @@ ugyanazt adja (így a kimenet is bájtra azonos).
 ## Használat
 
 ```
-sid2tvc [-s N | -a] [-o MAPPA] [-n NÉV] [-w] [-f N] [-m] [-q] fajl.sid
+sid2tvc [-s N | -a] [-b] [-t MP] [-o MAPPA] [-n NÉV] [-w] [-f N] [-m] [-q] fajl.sid|fajl.STC ...
   -s N      aldal (alapértelmezés: a .sid kezdő dala)
   -a        az összes aldal
   -o MAPPA  kimenet: MAPPA/<NÉV>/SONG<n>.STC   (alapértelmezés: SID_TVC)
@@ -29,6 +29,8 @@ sid2tvc [-s N | -a] [-o MAPPA] [-n NÉV] [-w] [-f N] [-m] [-q] fajl.sid
   -f N      hurok nélkül legfeljebb N képkocka (50/mp; alapértelmezés 30000 = 10 perc)
   -m        csak a memória-hurok (a hang ismétlődését nem keresi)
   -q        csak a hibákat írja ki
+  -b        BIN a SID unithoz (.STC helyett): SONG<n>_TAB.BIN + SONG<n>_DAL.BIN; .STC bemenettel is
+  -t MP     legfeljebb MP másodperc (a hurkos dalokra is), aztán elölről
 ```
 
 Példa: `sid2tvc -a -w Last_Ninja.sid` → `SID_TVC/LASTNINJ/SONG1.STC ... SONG11.STC` (+ WAV).
@@ -58,6 +60,14 @@ A `SID_TVC` mappát változatlan szerkezetben kell a TVC lemezére / SD-kártyá
 
 Nem kezeli (egyelőre): többszörös sebességű (CIA-val gyorsított) dalok, digi-hangok.
 A 2,5 kHz feletti hangokat a TVC (5008 Hz-es mintavétel) nem tudja tisztán lejátszani.
+
+## BIN a SID unithoz (-b, 1.4)
+
+`SONG<n>_TAB.BIN`: csak a dal által használt hangszín-táblák (N × 256 byte, érték × 16), laphatárra töltendő.
+`SONG<n>_DAL.BIN`: áthelyezhető kotta – 9 byte fejléc (a 3 hang kezdete, a kotta hossza: 16 bites, a kotta elejéhez
+képest; a táblák száma N: 1 byte), aztán a hangok folyamai. A REF ($10) és az ugrás ($11) címe is a kotta elejéhez
+képest; a szeletek táblaszáma (felső 4 bit) a használt táblák sorszáma (0..N-1; 14 zaj, 15 négyszög). A SID unit
+(SID2TVC TRSE Unit) a betöltési címet lejátszás közben adja hozzá. `.STC` bemenetből ugyanez lesz.
 
 ## A .STC formátum
 

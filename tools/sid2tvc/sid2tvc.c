@@ -54,7 +54,7 @@
 #define MKDIR(p) mkdir((p), 0755)
 #endif
 
-#define VERZIO "1.3"
+#define VERZIO "1.4"
 
 /* ------------------------------------------------------------------ TVC-oldali allandok */
 #define SONG_BASE   0x2300              /* a dal cime a TVC-n */
@@ -1214,6 +1214,106 @@ static int wav_ir(const char *path, const All *T, int nfr)
 /* ================================================================== egy aldal */
 static const char *nev_kapcsolo = NULL;     /* -n NEV */
 static int csak_mem = 0;                    /* -m: csak a memoria-hurok (a regi viselkedes) */
+static int bin_mod = 0;                     /* -b: a SID unithoz ket BIN (_TAB, _DAL) a .STC helyett */
+static int max_mp = 0;                      /* -t MP: legfeljebb MP masodperc (a hurkos dalokra is), aztan elolrol */
+
+/* ---------------------------------------------------------------- BIN a SID unithoz (-b)
+   A dal (song, L byte, a $2300-ra keszult kotta) -> elotag_DAL.BIN: athelyezheto kotta, a belso cimek a kotta elejehez
+   kepest; 9 byte fejlec: a 3 hang kezdete (16 bit), a kotta hossza (16 bit), a tablak szama (1 byte); utana a hangok
+   folyamai. A szeletek tablaszamai (felso 4 bit, 0..13) a hasznalt tablak sorszamara csokkentve (14 zaj, 15 negyszog
+   marad). elotag_TAB.BIN: csak a hasznalt tablak (N x 256 byte, ertek x 16), laphatarra toltendo. */
+static int bin_ir(const uint8_t *song, int L, uint8_t pal[PAL_N][256], const char *elotag)
+{
+    uint8_t *ki = xmalloc(L + 3), uj[16];
+    int used[16] = {0}, n_tab = 0, v, p, t, hossz = L + 3;
+    char fajl[1100];
+    FILE *fo;
+    for (t = 0; t < 16; t++) uj[t] = (uint8_t)t;
+    memcpy(ki + 9, song + 6, L - 6);
+    /* 1. kor: a hasznalt tablak */
+    for (v = 0; v < 3; v++) {
+        p = (song[2 * v] | (song[2 * v + 1] << 8)) - SONG_BASE;
+        for (;;) {
+            int c;
+            if (p < 6 || p >= L) { fprintf(stderr, "hibas dal (cim)\n"); free(ki); return 0; }
+            c = song[p];
+            if (c == 0x11) break;
+            if (c == 0x10) { p += 4; continue; }
+            if (c & 0x80) { p++; continue; }
+            if (c >= 0x10) { fprintf(stderr, "hibas dal (kod $%02X)\n", c); free(ki); return 0; }
+            p += 1 + ((c & 1) ? 2 : 0) + ((c & 2) ? 1 : 0);
+            if (c & 4) { if ((song[p] >> 4) < PAL_N) used[song[p] >> 4] = 1; p++; }
+            if (c & 8) p++;
+        }
+    }
+    for (t = 0; t < PAL_N; t++) if (used[t]) uj[t] = (uint8_t)n_tab++;
+    if (n_tab == 0) { used[0] = 1; uj[0] = 0; n_tab = 1; }
+    /* 2. kor: cimek (relativ, +3 a hosszabb fejlec miatt) es szeletek atirasa */
+    for (v = 0; v < 3; v++) {
+        int k0 = (song[2 * v] | (song[2 * v + 1] << 8)) - SONG_BASE;
+        ki[2 * v] = (uint8_t)((k0 + 3) & 0xFF); ki[2 * v + 1] = (uint8_t)((k0 + 3) >> 8);
+        p = k0;
+        for (;;) {
+            int c = song[p], a;
+            if (c == 0x10 || c == 0x11) {
+                a = (song[p + 1] | (song[p + 2] << 8)) - SONG_BASE + 3;
+                ki[p + 4] = (uint8_t)(a & 0xFF); ki[p + 5] = (uint8_t)(a >> 8);
+                if (c == 0x11) break;
+                p += 4;
+                continue;
+            }
+            if (c & 0x80) { p++; continue; }
+            p += 1 + ((c & 1) ? 2 : 0) + ((c & 2) ? 1 : 0);
+            if (c & 4) { ki[p + 3] = (uint8_t)((uj[song[p] >> 4] << 4) | (song[p] & 15)); p++; }
+            if (c & 8) p++;
+        }
+    }
+    ki[6] = (uint8_t)(hossz & 0xFF); ki[7] = (uint8_t)(hossz >> 8); ki[8] = (uint8_t)n_tab;
+    snprintf(fajl, sizeof(fajl), "%s_DAL.BIN", elotag);
+    fo = fopen(fajl, "wb");
+    if (!fo) { fprintf(stderr, "nem irhato: %s\n", fajl); free(ki); return 0; }
+    fwrite(ki, 1, hossz, fo);
+    fclose(fo);
+    info("  %s: %d byte - barhova\n", fajl, hossz);
+    snprintf(fajl, sizeof(fajl), "%s_TAB.BIN", elotag);
+    fo = fopen(fajl, "wb");
+    if (!fo) { fprintf(stderr, "nem irhato: %s\n", fajl); free(ki); return 0; }
+    for (t = 0; t < PAL_N; t++) if (used[t]) fwrite(pal[t], 1, 256, fo);
+    fclose(fo);
+    info("  %s: %d byte (%d tabla) - laphatarra ($xx00)\n", fajl, n_tab * 256, n_tab);
+    free(ki);
+    return 1;
+}
+
+/* .STC (1.3) -> BIN: a paletta es a kotta a fajlbol */
+static int stc_bin(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    uint8_t *d, pal[PAL_N][256], *song;
+    long n;
+    int L, split = 0xC000 - SONG_BASE, ok;
+    char elotag[1024], *pont;
+    if (!f) { fprintf(stderr, "nem olvashato: %s\n", path); return 0; }
+    fseek(f, 0, SEEK_END); n = ftell(f); fseek(f, 0, SEEK_SET);
+    d = xmalloc(n + 1);
+    if (fread(d, 1, n, f) != (size_t)n) { fclose(f); free(d); fprintf(stderr, "olvasasi hiba: %s\n", path); return 0; }
+    fclose(f);
+    if (n < 3692 || d[0] != 0xFD || d[1] != 0xFF) { free(d); fprintf(stderr, "%s: nem 1.3-as .STC\n", path); return 0; }
+    memcpy(pal, d + 106, sizeof(pal));
+    L = d[3690] | (d[3691] << 8);
+    if (3692 + L > n) { free(d); fprintf(stderr, "%s: rovid fajl\n", path); return 0; }
+    song = xmalloc(L);
+    if (L > split) { memcpy(song, d + 3692 + (L - split), split); memcpy(song + split, d + 3692, L - split); }
+    else memcpy(song, d + 3692, L);
+    snprintf(elotag, sizeof(elotag), "%s", path);
+    pont = strrchr(elotag, '.');
+    if (pont && !strchr(pont, '/') && !strchr(pont, '\\')) *pont = 0;
+    info("%s: %.31s / %.31s\n", path, (char *)d + 2, (char *)d + 34);
+    ok = bin_ir(song, L, pal, elotag);
+    free(song);
+    free(d);
+    return ok;
+}
 
 static void tvc_nev(const char *path, char *nev)
 {
@@ -1264,6 +1364,7 @@ static int aldal(const SidFajl *s, const char *path, int song, const char *outdi
         else dp.n = E;
     }
     if (dp.loop < 0 && dp.n > maxf) dp.n = maxf;      /* hurok nelkul legfeljebb maxf kepkocka (aztan elolrol) */
+    if (max_mp > 0 && dp.n > max_mp * 50) { dp.n = max_mp * 50; dp.loop = -1; hang = 0; mem_loop = -3; }
     Tv = xmalloc(sizeof(All) * (dp.n + 1));
     for (;;) {
         blob.n = 0; nref = 0;
@@ -1300,20 +1401,21 @@ static int aldal(const SidFajl *s, const char *path, int song, const char *outdi
         if (P == 1) info("%d:%02d-tol csend/kitartott hang (vege)", dp.loop / 50 / 60, dp.loop / 50 % 60);
         else info("%d:%02d-tol, %d:%02d hosszu", dp.loop / 50 / 60, dp.loop / 50 % 60, P / 50 / 60, P / 50 % 60);
         info(hang ? " [hang]" : " [memoria]");
-    } else info(mem_loop == -2 ? "van 10 perc utan, de ugy nem fer el -> 10 perc, aztan elolrol" : "nincs (elolrol)");
+    } else if (mem_loop == -3) info("a -t %d miatt %d mp, aztan elolrol", max_mp, max_mp);
+    else info(mem_loop == -2 ? "van 10 perc utan, de ugy nem fer el -> 10 perc, aztan elolrol" : "nincs (elolrol)");
     if (hang) {
         if (mem_loop >= 0) info(" (memoria szerint: %d:%02d-tol, %d:%02d)", mem_loop / 50 / 60, mem_loop / 50 % 60,
                                 (mem_n - mem_loop) / 50 / 60, (mem_n - mem_loop) / 50 % 60);
         else info(" (memoria szerint: nincs)");
     }
     info(", %d byte (%d REF)", blob.n, nref);
-    if (blob.n > SONG_MAX) {
+    if (blob.n > (bin_mod ? 0x10000 - SONG_BASE - 3 : SONG_MAX)) {
         info("\n");
         fprintf(stderr, "  TUL NAGY: %d byte, a TVC-n legfeljebb %d fer el - nem irtam ki\n", blob.n, SONG_MAX);
         return 0;
     }
     /* ellenorzes: a TVC dekodoloja pontosan ezt adja vissza (+ 200 kepkocka a hurok utan) */
-    if (blob.n <= SONG_MAX) {
+    if (blob.n <= 0x10000 - SONG_BASE) {
         uint8_t *m = xmalloc(65536);
         Dek d[3];
         int extra = 200;
@@ -1334,6 +1436,13 @@ static int aldal(const SidFajl *s, const char *path, int song, const char *outdi
                 }
             }
         free(m);
+    }
+    if (bin_mod) {
+        info("\n");
+        snprintf(fajl, sizeof(fajl), "%s/SONG%d", mappa, song);
+        if (!bin_ir(blob.b, blob.n, Paletta, fajl)) return 0;
+        fo = NULL;
+        goto bin_kesz;
     }
     snprintf(fajl, sizeof(fajl), "%s/SONG%d.STC", mappa, song);
     fo = fopen(fajl, "wb");
@@ -1357,6 +1466,7 @@ static int aldal(const SidFajl *s, const char *path, int song, const char *outdi
     }
     fclose(fo);
     info(" -> %s\n", fajl);
+bin_kesz:
     if (wav) {
         snprintf(fajl, sizeof(fajl), "%s/SONG%d.WAV", mappa, song);
         if (wav_ir(fajl, T, dp.n)) info("  WAV: %s\n", fajl);
@@ -1371,8 +1481,8 @@ static int aldal(const SidFajl *s, const char *path, int song, const char *outdi
 
 static void hasznalat(void)
 {
-    printf("sid2tvc " VERZIO " - C64 .sid -> TVC SIDSoftEMU dal (.STC)\n"
-           "hasznalat: sid2tvc [-s N | -a] [-o MAPPA] [-n NEV] [-w] [-f N] [-m] [-q] fajl.sid [fajl2.sid ...]\n"
+    printf("sid2tvc " VERZIO " - C64 .sid -> TVC: SIDSoftEMU dal (.STC) vagy BIN a SID unithoz (-b)\n"
+           "hasznalat: sid2tvc [-s N | -a] [-b] [-t MP] [-o MAPPA] [-n NEV] [-w] [-f N] [-m] [-q] fajl.sid|fajl.STC ...\n"
            "  kapcsolo nelkul (pl. a .sid fajlt a programra huzva): az osszes aldal, a .sid melle (SID_TVC mappa)\n"
            "  -s N      aldal (alapertelmezes: a .sid kezdo dala)\n"
            "  -a        az osszes aldal\n"
@@ -1381,7 +1491,10 @@ static void hasznalat(void)
            "  -w        WAV elonezet is (a TVC hangja): MAPPA/<NEV>/SONG<n>.WAV\n"
            "  -f N      hurok nelkul legfeljebb N kepkocka (50/mp, alapertelmezes 30000 = 10 perc)\n"
            "  -m        csak a memoria-hurok (a hang ismetlodeset nem keresi)\n"
-           "  -q        csak a hibak\n");
+           "  -q        csak a hibak\n"
+           "  -b        BIN a SID unithoz (.STC helyett): SONG<n>_TAB.BIN (a hasznalt tablak, laphatarra) es\n"
+           "            SONG<n>_DAL.BIN (a kotta, barhova). .STC bemenettel is: SONG1.STC -> SONG1_TAB.BIN, SONG1_DAL.BIN\n"
+           "  -t MP     legfeljebb MP masodperc (a hurkos dalokra is), aztan elolrol - rovidebb, kisebb dal\n");
 }
 
 /* Windows: ha a program sajat konzolablakot kapott (dupla kattintas, fajl az ikonra huzva), a vegen megvar,
@@ -1408,10 +1521,21 @@ static void sid_melle(const char *path, char *ki, size_t n)
     else snprintf(ki, n, "SID_TVC");
 }
 
+static int stc_e(const char *path)
+{
+    size_t n = strlen(path);
+    return n > 4 && path[n - 4] == '.' && toupper((unsigned char)path[n - 3]) == 'S' &&
+           toupper((unsigned char)path[n - 2]) == 'T' && toupper((unsigned char)path[n - 1]) == 'C';
+}
+
 static int egy_fajl(const char *path, int song, int osszes, const char *outdir, int maxf, int wav)
 {
     SidFajl s;
     int i, jo = 1;
+    if (stc_e(path)) {
+        if (!bin_mod) { fprintf(stderr, "%s: .STC-bol csak BIN lehet (-b)\n", path); return 0; }
+        return stc_bin(path);
+    }
     if (!sid_olvas(path, &s)) return 0;
     info("%s: %s, %d aldal (kezdo: %d), load $%04X init $%04X play $%04X\n", path, s.magic, s.songs, s.start,
          s.load, s.init, s.play);
@@ -1440,6 +1564,8 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-m")) csak_mem = 1;
         else if (!strcmp(argv[i], "-f") && i + 1 < argc) maxf = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-q")) csendes = 1;
+        else if (!strcmp(argv[i], "-b")) bin_mod = 1;
+        else if (!strcmp(argv[i], "-t") && i + 1 < argc) max_mp = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-D") && i + 1 < argc) debug_ki = argv[++i];
         else if (argv[i][0] == '-') { hasznalat(); varakozas(); return 1; }
         else nfajl++;
@@ -1451,7 +1577,8 @@ int main(int argc, char **argv)
     for (i = 1; i < argc; i++) {
         char ki[1024];
         if (argv[i][0] == '-') {
-            if (strcmp(argv[i], "-a") && strcmp(argv[i], "-w") && strcmp(argv[i], "-m") && strcmp(argv[i], "-q")) i++;
+            if (strcmp(argv[i], "-a") && strcmp(argv[i], "-w") && strcmp(argv[i], "-m") && strcmp(argv[i], "-q") &&
+                strcmp(argv[i], "-b")) i++;
             continue;
         }
         if (outdir) snprintf(ki, sizeof(ki), "%s", outdir);
