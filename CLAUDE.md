@@ -139,6 +139,8 @@ A lejátszó unitként (`SID.tru`) + minta + demózene + stc2bin.py **külön ny
 A `sid/` mappa a teljes git-történetből is törölve (átírt történet, force push). Helyben megvan (`.gitignore`: `sid/`),
 a sid2tvc bájtpróbájához (`tools/sid2tvc/teszt.sh`) kell; ha nincs, a próba kimarad - a GitHub Actions ezért csak fordít.
 Nyilvános helyre (repó, release) .sid fájl ne kerüljön.
+**A Windows-os gépen** a régi klón története eltér (a force push miatt): ott `git fetch` + `git reset --hard origin/main`
+kell (előtte megnézni, van-e ott helyi, fel nem töltött változás!), és a `sid/` fájlokat kézzel odamásolni, ha kellenek.
 
 ## Kilépés (2026-11-01, freeTVC headless-ben kipróbálva)
 ESC a gyökérben -> `Kilepes`: doboz középen „Biztosan kilépsz?” I/N (a felhasználó kérése). N vagy ESC (nincs kiírva) = `Rajz()`. I = elengedésre
