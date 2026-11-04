@@ -1169,7 +1169,7 @@ static void w32(FILE *f, long v) { w16(f, (int)(v & 0xFFFF)); w16(f, (int)((v >>
 
 static int wav_ir(const char *path, const All *T, int nfr)
 {
-    const int OUT = 22050;
+    const int WAV_FS = 22050;
     long nport = (long)nfr * IT_PER_FRAME, nout, t;
     uint8_t *port = xmalloc(nport + 1);
     uint16_t ph[3] = {0, 0, 0};
@@ -1195,14 +1195,14 @@ static int wav_ir(const char *path, const All *T, int nfr)
             port[pi++] = (uint8_t)(tot + (15 - sumL) / 2);
         }
     }
-    nout = (long)(nport * OUT / TVC_FS);
+    nout = (long)(nport * WAV_FS / TVC_FS);
     fo = fopen(path, "wb");
     if (!fo) { free(port); return 0; }
     fwrite("RIFF", 1, 4, fo); w32(fo, 36 + nout * 2); fwrite("WAVEfmt ", 1, 8, fo);
-    w32(fo, 16); w16(fo, 1); w16(fo, 1); w32(fo, OUT); w32(fo, OUT * 2); w16(fo, 2); w16(fo, 16);
+    w32(fo, 16); w16(fo, 1); w16(fo, 1); w32(fo, WAV_FS); w32(fo, WAV_FS * 2); w16(fo, 2); w16(fo, 16);
     fwrite("data", 1, 4, fo); w32(fo, nout * 2);
     for (t = 0; t < nout; t++) {
-        long k = (long)(t * TVC_FS / OUT);
+        long k = (long)(t * TVC_FS / WAV_FS);
         int x = port[k < nport ? k : nport - 1];
         w16(fo, (int)((x - 7.5) / 7.5 * 20000));
     }

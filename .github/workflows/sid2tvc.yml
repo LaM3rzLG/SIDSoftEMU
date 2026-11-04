@@ -19,13 +19,13 @@ jobs:
         include:
           - { nev: linux-x86_64, cc: gcc,                     csomag: '',                      extra: '',                          futtat: '',               teszt: '' }
           - { nev: linux-i686,   cc: gcc,                     csomag: gcc-multilib,            extra: '-m32 -msse2 -mfpmath=sse',  futtat: '',               teszt: '' }
-          - { nev: linux-arm64,  cc: aarch64-linux-gnu-gcc,   csomag: gcc-aarch64-linux-gnu,   extra: '',                          futtat: qemu-aarch64-static, teszt: gyors }
-          - { nev: linux-armhf,  cc: arm-linux-gnueabihf-gcc, csomag: gcc-arm-linux-gnueabihf, extra: '',                          futtat: qemu-arm-static,  teszt: gyors }
+          - { nev: linux-arm64,  cc: aarch64-linux-gnu-gcc,   csomag: gcc-aarch64-linux-gnu,   extra: '',                          futtat: qemu-aarch64, teszt: gyors }
+          - { nev: linux-armhf,  cc: arm-linux-gnueabihf-gcc, csomag: gcc-arm-linux-gnueabihf, extra: '',                          futtat: qemu-arm,          teszt: gyors }
     steps:
       - uses: actions/checkout@v4
       - name: Eszközök
         if: matrix.csomag != ''
-        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.csomag }} qemu-user-static
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.csomag }} qemu-user
       - name: Fordítás
         run: |
           mkdir -p ki
