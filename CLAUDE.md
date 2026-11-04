@@ -122,6 +122,12 @@ hossz + 12 jel - csak ha a név > 12, különben szemét!), `$58` lezárás. A .
 Betöltés: csak a név (mint a NanoSD-nél); a .STC nem .cas, ezért a kártya nem kér CAS-fejlécet. freeTVC: `--card256
 --card256-usb <mappa>`. Kód vége most $3DFB, mentés 13 046 B (a határ 13 312!).
 
+## Gördülő lista (2026-11-04, freeTVC-ben kipróbálva, a felhasználó kérése: gyorsabb legyen)
+`UjSel`: ha a kijelölés egy sorral lép ki a látható 14-ből, a `Gordit` a 13 sort `LDIR`/`LDDR`-rel tolja a VID-ben (lista =
+26..193. pontsor, 9984 B; `SavMod` 0 = fel, 1 = le), a `SavLe` leveszi a sávot a régi sorról, és csak az új sor rajzolódik
+(`SorRajz`). Mérve: 80 ms/lépés (régen a teljes `ListaRajz` ~450 ms). **A VID-be mentett rész most 13 270 B (a határ 13 312:
+csak 42 B tartalék!)** - új kódnál előbb helyet kell csinálni.
+
 ## Kilépés (2026-11-01, freeTVC headless-ben kipróbálva)
 ESC a gyökérben -> `Kilepes`: doboz középen „Biztosan kilépsz?” I/N (a felhasználó kérése). N vagy ESC (nincs kiírva) = `Rajz()`. I = elengedésre
 vár, `GE::EnableTVCITHandler`, $70 lapozás, a BASIC IX/IY/második regiszterkészlete vissza (`IndMent` a főprogram elején:

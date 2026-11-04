@@ -2005,20 +2005,93 @@ begin
 end;
 
 
+/* a lista 13 sorat egy sorral (12 pontsor) tolja a kepmemoriaban: SavMod 0 = fel (lefele lepunk), 1 = le (felfele lepunk).
+   A lista a 26..193. pontsor (LISTA_Y - 1, 14 x 12); egy pontsor 64 byte. 13 x 12 x 64 = 9984 = $2700 byte (~67 ms). */
+procedure Gordit();
+begin
+	asm("
+		ld	hl,(GE_ScreenAddr)
+		ld	a,(SavMod)
+		or	a
+		jr	nz,GoLe
+		ld	de,$0980			;	38. pontsor -> 26.
+		add	hl,de
+		push	hl
+		ld	de,$FD00			;	-$0300 = 12 pontsor
+		add	hl,de
+		ex	de,hl
+		pop	hl
+		ld	bc,$2700
+		ldir
+		jr	GoVege
+	GoLe:
+		ld	de,$2D7F			;	a 181. pontsor vege -> a 193. vege
+		add	hl,de
+		push	hl
+		ld	de,$0300
+		add	hl,de
+		ex	de,hl
+		pop	hl
+		ld	bc,$2700
+		lddr
+	GoVege:
+	");
+end;
+
+
+/* a sav le az n-edik sorrol (a sor a Top szerint latszik) */
+procedure SavLe(n : byte);
+begin
+	y := LISTA_Y + (n - Top) * 12;
+	Cs_S := 0;
+	while (Cs_S < 12) do
+	begin
+		SavSor(y - 1 + Cs_S, 0);
+		Cs_S := Cs_S + 1;
+	end;
+end;
+
+
 procedure UjSel(n : byte);
 begin
 	Regi := Sel;
 	Sel := n;
 	if (Sel < Top) then
 	begin
-		Top := Sel;
-		ListaRajz();
+		if (Sel + 1 = Top) then
+		begin
+			/* egy sorral feljebb: a lista lecsuszik, csak a felso sor uj */
+			SavLe(Regi);
+			Top := Sel;
+			SavMod := 1;
+			Gordit();
+			y := LISTA_Y;
+			SorRajz(Sel);
+		end
+		else
+		begin
+			Top := Sel;
+			ListaRajz();
+		end;
 	end
 	else
 	if (Sel - Top >= LATHATO) then
 	begin
-		Top := Sel - LATHATO + 1;
-		ListaRajz();
+		if (Sel - Top = LATHATO) then
+		begin
+			/* egy sorral lejjebb: a lista felcsuszik, csak az also sor uj */
+			SavLe(Regi);
+			Top := Top + 1;
+			SavMod := 0;
+			Gordit();
+			y := LISTA_Y + (LATHATO - 1) * 12;
+			SorRajz(Sel);
+		end
+		else
+		begin
+			Top := Sel - LATHATO + 1;
+			ListaRajz();
+		end;
 	end
 	else
 	begin
