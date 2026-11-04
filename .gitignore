@@ -15,7 +15,7 @@ tools/sid2tvc/sid2tvc.exe
 SIDTVC.dsk
 SD_KARTYA/
 tools/sid_ref/sid_ref
-SIDLEJATSZO/SIDLejatszo.asm
-SIDLEJATSZO/SIDLejatszo.bin
-SIDLEJATSZO/SIDLejatszo.sym
-!SIDLEJATSZO/SIDLejatszo.cas
+SIDLEJATSZO/SIDPelda.asm
+SIDLEJATSZO/SIDPelda.bin
+SIDLEJATSZO/SIDPelda.sym
+!SIDLEJATSZO/SIDPelda.cas
