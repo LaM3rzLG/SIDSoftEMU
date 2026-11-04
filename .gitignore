@@ -15,7 +15,5 @@ tools/sid2tvc/sid2tvc.exe
 SIDTVC.dsk
 SD_KARTYA/
 tools/sid_ref/sid_ref
-SIDLEJATSZO/SIDPelda.asm
-SIDLEJATSZO/SIDPelda.bin
-SIDLEJATSZO/SIDPelda.sym
-!SIDLEJATSZO/SIDPelda.cas
+# a .sid fajlok jogdij miatt nincsenek a repoban (2026-11-04); helyben a sid2tvc bajtprobajahoz kellenek
+sid/

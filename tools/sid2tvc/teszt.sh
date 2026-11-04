@@ -2,7 +2,10 @@
 # A lefordított sid2tvc kimenete bájtra egyezik-e a sid_tvc/ mappában lévő dalokkal.
 #   sh tools/sid2tvc/teszt.sh <program> [gyors]     (a repó gyökeréből)
 # "gyors" = csak 3 dal (emulált processzoron, qemu alatt)
-BIN=$1; MOD=$2; KI=${TMPDIR:-/tmp}/sid2tvc_teszt_$$; HIBA=0
+BIN=$1; MOD=$2;
+# a .sid fajlok jogdij miatt nincsenek a repoban: helyben a sid/ mappaba kell tenni oket (HVSC: Last_Ninja_1.sid, _2.sid)
+if [ ! -f sid/Last_Ninja_1.sid ] || [ ! -f sid/Last_Ninja_2.sid ]; then echo "nincs sid/Last_Ninja_1-2.sid: a proba kimarad"; exit 0; fi
+ KI=${TMPDIR:-/tmp}/sid2tvc_teszt_$$; HIBA=0
 rm -rf "$KI"
 if [ "$MOD" = gyors ]; then
   $BIN -q -s 1 -n LNINJA1 -o "$KI" sid/Last_Ninja_1.sid

@@ -131,16 +131,14 @@ Betöltés: csak a név (mint a NanoSD-nél); a .STC nem .cas, ezért a kártya 
 (`SorRajz`). Mérve: 80 ms/lépés (régen a teljes `ListaRajz` ~450 ms). **A VID-be mentett rész most 13 270 B (a határ 13 312:
 csak 42 B tartalék!)** - új kódnál előbb helyet kell csinálni.
 
-## SID unit (2026-11-04, freeTVC-ben kipróbálva; a felhasználó kérése: unit, mint a GE, játék háttérzenéjéhez)
-A repó NYILVÁNOS. `SIDLEJATSZO/SID.tru` = `Unit SID`: `SID::Init(Dal, Paletta, Lap)`, `Start`, `Sync` (vár a képkockára,
-a `GE::WaitForSync` = halt helyett), `Play` (léptetés, legfeljebb 4 lemaradt képkockát behoz), `Stop`. (`Step` és `Wait`
-foglalt szó a TRSE-ben!) A játékhoz átalakítva: a fázisok a memóriában (önmódosító `ld hl,fázis`), **IX/IY szabad**
-(a GE sprite-jai és a TRSE-kód használják), a BC'DE'HL'AF' a hang-IT-é (mint a GE digi-hangjánál); 391 T/IT = 63% CPU.
-A dal bárhol (`SIDLEJATSZO/tools/stc2bin.py -c CÍM` áthelyezi: fejléc, REF $10, ugrás $11), a táblák lapja választható
-(`Lap`; $F0 -> GE::MEM_48K_VID kell). Start: KsSync (R5 = 0, kurzor-IT a 239. sor végén) -> a Sync a kép aljához igazodik.
-A zajtábla `db`-ben a unitban. Minta: `SIDPelda.ras` (pattogó négyzet + zene); build: `bash resources/build_lejatszo_mac.sh`
-(`load"SIDPELDA"`). A TRSE a projekt mappájából veszi a .tru-t. Asm-ben a `db`-ben nem lehet kifejezés (3+32 -> 35).
-Mérve: a négyzet 50 Hz-en mozog, a hang a sid2tvc WAV-jával 0,68-0,89, nem csúszik.
+## SID unit -> saját repó (2026-11-04)
+A lejátszó unitként (`SID.tru`) + minta + demózene + stc2bin.py **külön nyilvános repóban: ../SID-Player-for-TRSE**
+(https://github.com/LaM3rzLG/SID-Player-for-TRSE; részletek az ottani CLAUDE.md-ben). Innen a `SIDLEJATSZO/` kikerült.
+
+## A .sid fájlok NINCSENEK a repóban (2026-11-04, a felhasználó döntése: JOGDÍJ miatt)
+A `sid/` mappa a teljes git-történetből is törölve (átírt történet, force push). Helyben megvan (`.gitignore`: `sid/`),
+a sid2tvc bájtpróbájához (`tools/sid2tvc/teszt.sh`) kell; ha nincs, a próba kimarad - a GitHub Actions ezért csak fordít.
+Nyilvános helyre (repó, release) .sid fájl ne kerüljön.
 
 ## Kilépés (2026-11-01, freeTVC headless-ben kipróbálva)
 ESC a gyökérben -> `Kilepes`: doboz középen „Biztosan kilépsz?” I/N (a felhasználó kérése). N vagy ESC (nincs kiírva) = `Rajz()`. I = elengedésre

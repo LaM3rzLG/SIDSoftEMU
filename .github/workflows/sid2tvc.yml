@@ -1,4 +1,5 @@
-# sid2tvc: fordítás minden rendszerre + ellenőrzés (a kimenet bájtra egyezik a sid_tvc/ dalaival).
+# sid2tvc: fordítás minden rendszerre. A bájtpróba (teszt.sh) csak helyben fut: a .sid fájlok jogdíj miatt nincsenek
+# a repóban, ezért itt kimarad.
 # Kézzel indul (Actions -> sid2tvc -> Run workflow), vagy ha a forrás változik.
 name: sid2tvc
 
