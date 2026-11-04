@@ -131,6 +131,14 @@ Betöltés: csak a név (mint a NanoSD-nél); a .STC nem .cas, ezért a kártya 
 (`SorRajz`). Mérve: 80 ms/lépés (régen a teljes `ListaRajz` ~450 ms). **A VID-be mentett rész most 13 270 B (a határ 13 312:
 csak 42 B tartalék!)** - új kódnál előbb helyet kell csinálni.
 
+## sid2tvc 1.4 + SID unit BIN-es (2026-11-04 este)
+- **sid2tvc 1.4:** `-b` = BIN a unithoz (`SONGn_TAB.BIN`: csak a használt táblák, laphatárra; `SONGn_DAL.BIN`: áthelyezhető
+  kotta, 9 byte fejléc, a REF/ugrás címe a kotta elejéhez képest), `.STC` bemenet (`sid2tvc -b SONG1.STC`), `-t MP`
+  hosszkorlát a hurkos dalokra is. A .STC-kimenet bájtra változatlan. Ellenőrizve: mind a 23 dal képkockára egyezik
+  (Python dekódoló-szimuláció, más betöltési címen). A Last Ninja dalok közül 8 csak 1-2 táblát használ (-3 KB).
+- A kiadásban a mappa neve **SID2TVC_Converter** (TVC-Programok), a unit kiadása **SID2TVC_TRSE_Unit** (release
+  `sid2tvc-trse-unit-1.0`); a unit fejlesztése a ../SID-Player-for-TRSE repóban.
+
 ## SID unit -> saját repó (2026-11-04)
 A lejátszó unitként (`SID.tru`) + minta + demózene + stc2bin.py **külön nyilvános repóban: ../SID-Player-for-TRSE**
 (https://github.com/LaM3rzLG/SID-Player-for-TRSE; részletek az ottani CLAUDE.md-ben). Innen a `SIDLEJATSZO/` kikerült.

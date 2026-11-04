@@ -5,9 +5,9 @@ Ez a fejlesztés forrása (TRSE / Z80, C, Python).
 
 - **Kész program, letöltés:** [TVC-Programok / SIDSoftEMU](https://github.com/LaM3rzLG/TVC-Programok/tree/main/SIDSoftEMU)
   (`SIDTVC.CAS`, `SIDTVC.dsk`, zenék) és a PC-s átalakító, a
-  [sid2tvc](https://github.com/LaM3rzLG/TVC-Programok/tree/main/sid2tvc) (Windows, macOS, Linux).
-- **Háttérzene saját programba / játékba:** [SID Player for TRSE](https://github.com/LaM3rzLG/SID-Player-for-TRSE) – a
-  `SID` unit (`@use "SID"`, `SID::Start` / `SID::Play` / `SID::Stop`), mintával és leírással.
+  [SID2TVC Converter](https://github.com/LaM3rzLG/TVC-Programok/tree/main/SID2TVC_Converter) (sid2tvc; Windows, macOS, Linux).
+- **Háttérzene saját programba / játékba:** [SID2TVC TRSE Unit](https://github.com/LaM3rzLG/TVC-Programok/tree/main/SID2TVC_TRSE_Unit)
+  (forrás: [SID-Player-for-TRSE](https://github.com/LaM3rzLG/SID-Player-for-TRSE)) – a `SID` unit (`@use "SID"`, `SID::Start` / `SID::Play` / `SID::Stop`), mintával és leírással.
 - **Hogyan működik:** [MUKODES.md](https://github.com/LaM3rzLG/TVC-Programok/blob/main/SIDSoftEMU/MUKODES.md).
 
 | Hol | Mi |
