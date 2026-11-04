@@ -47,6 +47,7 @@
 #endif
 #ifdef _WIN32
 #include <direct.h>
+#include <windows.h>
 #define MKDIR(p) _mkdir(p)
 #else
 #include <sys/stat.h>
@@ -1371,7 +1372,8 @@ static int aldal(const SidFajl *s, const char *path, int song, const char *outdi
 static void hasznalat(void)
 {
     printf("sid2tvc " VERZIO " - C64 .sid -> TVC SIDSoftEMU dal (.STC)\n"
-           "hasznalat: sid2tvc [-s N | -a] [-o MAPPA] [-n NEV] [-w] [-f N] [-m] [-q] fajl.sid\n"
+           "hasznalat: sid2tvc [-s N | -a] [-o MAPPA] [-n NEV] [-w] [-f N] [-m] [-q] fajl.sid [fajl2.sid ...]\n"
+           "  kapcsolo nelkul (pl. a .sid fajlt a programra huzva): az osszes aldal, a .sid melle (SID_TVC mappa)\n"
            "  -s N      aldal (alapertelmezes: a .sid kezdo dala)\n"
            "  -a        az osszes aldal\n"
            "  -o MAPPA  kimenet: MAPPA/<NEV>/SONG<n>.STC (alapertelmezes: SID_TVC)\n"
@@ -1382,13 +1384,54 @@ static void hasznalat(void)
            "  -q        csak a hibak\n");
 }
 
+/* Windows: ha a program sajat konzolablakot kapott (dupla kattintas, fajl az ikonra huzva), a vegen megvar,
+   kulonben az ablak rogton bezarulna */
+static void varakozas(void)
+{
+#ifdef _WIN32
+    DWORD lista[2];
+    if (GetConsoleProcessList(lista, 2) == 1) {
+        int c;
+        printf("\nNyomj Entert a kilepeshez...");
+        fflush(stdout);
+        while ((c = getchar()) != '\n' && c != EOF) {}
+    }
+#endif
+}
+
+/* egyszeru mod (csak fajlnevek, kapcsolo nelkul): az osszes aldal, a kimenet a .sid melle, SID_TVC mappaba */
+static void sid_melle(const char *path, char *ki, size_t n)
+{
+    const char *p, *v = NULL;
+    for (p = path; *p; p++) if (*p == '/' || *p == '\\') v = p;
+    if (v) snprintf(ki, n, "%.*sSID_TVC", (int)(v - path + 1), path);
+    else snprintf(ki, n, "SID_TVC");
+}
+
+static int egy_fajl(const char *path, int song, int osszes, const char *outdir, int maxf, int wav)
+{
+    SidFajl s;
+    int i, jo = 1;
+    if (!sid_olvas(path, &s)) return 0;
+    info("%s: %s, %d aldal (kezdo: %d), load $%04X init $%04X play $%04X\n", path, s.magic, s.songs, s.start,
+         s.load, s.init, s.play);
+    if (osszes) {
+        for (i = 1; i <= s.songs; i++) if (!aldal(&s, path, i, outdir, maxf, wav)) jo = 0;
+    } else {
+        if (song == 0) song = s.start ? s.start : 1;
+        if (song < 1 || song > s.songs) { fprintf(stderr, "nincs ilyen aldal: %d (1..%d)\n", song, s.songs); return 0; }
+        jo = aldal(&s, path, song, outdir, maxf, wav);
+    }
+    return jo;
+}
+
 int main(int argc, char **argv)
 {
-    const char *path = NULL, *outdir = "SID_TVC";
-    int song = 0, osszes = 0, wav = 0, maxf = 30000, i, jo = 1;
-    SidFajl s;
+    const char *outdir = NULL;
+    int song = 0, osszes = 0, wav = 0, maxf = 30000, i, jo = 1, nfajl = 0, kapcsolo = 0;
     STEP_MUL = PAL_CLK * 65536 / (16777216 * (3125000.0 / 16 / 39));
     for (i = 1; i < argc; i++) {
+        if (argv[i][0] == '-') kapcsolo = 1;
         if (!strcmp(argv[i], "-s") && i + 1 < argc) song = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-a")) osszes = 1;
         else if (!strcmp(argv[i], "-o") && i + 1 < argc) outdir = argv[++i];
@@ -1398,20 +1441,25 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-f") && i + 1 < argc) maxf = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-q")) csendes = 1;
         else if (!strcmp(argv[i], "-D") && i + 1 < argc) debug_ki = argv[++i];
-        else if (argv[i][0] == '-') { hasznalat(); return 1; }
-        else path = argv[i];
+        else if (argv[i][0] == '-') { hasznalat(); varakozas(); return 1; }
+        else nfajl++;
     }
-    if (!path) { hasznalat(); return 1; }
-    if (!sid_olvas(path, &s)) return 1;
+    if (!nfajl) { hasznalat(); varakozas(); return 1; }
     if (maxf < 1) maxf = 1;
-    info("%s: %s, %d aldal (kezdo: %d), load $%04X init $%04X play $%04X\n", path, s.magic, s.songs, s.start,
-         s.load, s.init, s.play);
-    if (osszes) {
-        for (i = 1; i <= s.songs; i++) if (!aldal(&s, path, i, outdir, maxf, wav)) jo = 0;
-    } else {
-        if (song == 0) song = s.start ? s.start : 1;
-        if (song < 1 || song > s.songs) { fprintf(stderr, "nincs ilyen aldal: %d (1..%d)\n", song, s.songs); return 1; }
-        jo = aldal(&s, path, song, outdir, maxf, wav);
+    if (!kapcsolo) osszes = 1;
+    if (nfajl > 1) nev_kapcsolo = NULL;         /* tobb fajlnal a -n nem hasznalhato */
+    for (i = 1; i < argc; i++) {
+        char ki[1024];
+        if (argv[i][0] == '-') {
+            if (strcmp(argv[i], "-a") && strcmp(argv[i], "-w") && strcmp(argv[i], "-m") && strcmp(argv[i], "-q")) i++;
+            continue;
+        }
+        if (outdir) snprintf(ki, sizeof(ki), "%s", outdir);
+        else if (!kapcsolo) sid_melle(argv[i], ki, sizeof(ki));
+        else snprintf(ki, sizeof(ki), "SID_TVC");
+        if (!egy_fajl(argv[i], song, osszes, ki, maxf, wav)) jo = 0;
+        else if (!kapcsolo) info("A dalok helye: %s\n", ki);
     }
+    varakozas();
     return jo ? 0 : 1;
 }
