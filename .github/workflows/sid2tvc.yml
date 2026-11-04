@@ -1,0 +1,79 @@
+# sid2tvc: fordítás minden rendszerre + ellenőrzés (a kimenet bájtra egyezik a sid_tvc/ dalaival).
+# Kézzel indul (Actions -> sid2tvc -> Run workflow), vagy ha a forrás változik.
+name: sid2tvc
+
+on:
+  workflow_dispatch:
+  push:
+    paths: ['tools/sid2tvc/**', '.github/workflows/sid2tvc.yml']
+
+env:
+  CFLAGS: -O2 -std=c99 -Wall -Wextra -ffp-contract=off
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { nev: linux-x86_64, cc: gcc,                     csomag: '',                      extra: '',                          futtat: '',               teszt: '' }
+          - { nev: linux-i686,   cc: gcc,                     csomag: gcc-multilib,            extra: '-m32 -msse2 -mfpmath=sse',  futtat: '',               teszt: '' }
+          - { nev: linux-arm64,  cc: aarch64-linux-gnu-gcc,   csomag: gcc-aarch64-linux-gnu,   extra: '',                          futtat: qemu-aarch64-static, teszt: gyors }
+          - { nev: linux-armhf,  cc: arm-linux-gnueabihf-gcc, csomag: gcc-arm-linux-gnueabihf, extra: '',                          futtat: qemu-arm-static,  teszt: gyors }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Eszközök
+        if: matrix.csomag != ''
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.csomag }} qemu-user-static
+      - name: Fordítás
+        run: |
+          mkdir -p ki
+          ${{ matrix.cc }} $CFLAGS ${{ matrix.extra }} -static -s -o ki/sid2tvc tools/sid2tvc/sid2tvc.c -lm
+          file ki/sid2tvc
+      - name: Ellenőrzés
+        run: sh tools/sid2tvc/teszt.sh "${{ matrix.futtat }} ki/sid2tvc" ${{ matrix.teszt }}
+      - uses: actions/upload-artifact@v4
+        with: { name: 'sid2tvc-${{ matrix.nev }}', path: ki/sid2tvc }
+
+  windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { nev: windows-x64, rendszer: MINGW64, csomag: mingw-w64-x86_64-gcc, extra: '' }
+          - { nev: windows-x86, rendszer: MINGW32, csomag: mingw-w64-i686-gcc,   extra: '-msse2 -mfpmath=sse' }
+    defaults:
+      run: { shell: 'msys2 {0}' }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with: { msystem: '${{ matrix.rendszer }}', install: '${{ matrix.csomag }} diffutils' }
+      - name: Fordítás
+        run: |
+          mkdir -p ki
+          gcc $CFLAGS ${{ matrix.extra }} -static -s -o ki/sid2tvc.exe tools/sid2tvc/sid2tvc.c -lm
+          file ki/sid2tvc.exe
+      - name: Ellenőrzés
+        run: sh tools/sid2tvc/teszt.sh ki/sid2tvc.exe
+      - uses: actions/upload-artifact@v4
+        with: { name: 'sid2tvc-${{ matrix.nev }}', path: ki/sid2tvc.exe }
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fordítás (Apple Silicon + Intel egy fájlban, macOS 10.13-tól)
+        run: |
+          mkdir -p ki
+          clang $CFLAGS -arch arm64 -arch x86_64 -mmacosx-version-min=10.13 -o ki/sid2tvc tools/sid2tvc/sid2tvc.c -lm
+          strip ki/sid2tvc; lipo -info ki/sid2tvc
+      - name: Ellenőrzés (Apple Silicon)
+        run: sh tools/sid2tvc/teszt.sh ki/sid2tvc
+      - name: Ellenőrzés (Intel, Rosettával)
+        run: |
+          softwareupdate --install-rosetta --agree-to-license || true
+          sh tools/sid2tvc/teszt.sh "arch -x86_64 ki/sid2tvc" gyors
+      - uses: actions/upload-artifact@v4
+        with: { name: sid2tvc-macos, path: ki/sid2tvc }
