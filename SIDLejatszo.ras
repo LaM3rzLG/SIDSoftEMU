@@ -1,0 +1,602 @@
+program SIDLejatszo;
+
+/* ============================================================================================================
+   SIDLejatszo - a SIDSoftEMU lejátszója önállóan (fájlkezelés nélkül), Videoton TV-Computer, TRSE.
+   C64-es SID-zene (a PC-s sid2tvc-vel átalakítva) 3 hangon, a TVC 4 bites hangkimenetén (port 6), 5008 Hz-en.
+
+   A ZENEI ADAT (a memóriában kell lennie a SidInit előtt; a sid2tvc .STC fájljából: tools/stc2bin.py)
+     DAL_CIM   $2300        a dal (xxx_dal.bin). A dal belső címei abszolútak, ezért a cím KÖTÖTT ($2300 =
+                            a sid2tvc SONG_BASE-e). Hossza legfeljebb 51 456 byte ($2300-$EBFF).
+                            Felépítés: 6 byte fejléc (a 3 hang folyamának címe), aztán hangonként képkockánként
+                            egy rekord (sid2tvc README, „A .STC formátum”). A dal vége ugrás a hurokpontra:
+                            a zene a SidStop-ig szól.
+     PALETTA   $F000-$FDFF  a dal 14 hangszín-táblája (xxx_paletta.bin, 14 x 256 byte, érték x 16).
+                            SidPalettaMasol(cím) bemásolja oda bárhonnan.
+     a lejátszó generálja (SidInit):  $FE00 zaj-tábla (a SidZaj-ból), $FF00 szintlap (érték x szint).
+
+   PARAMÉTEREK (változók)
+     SidMod    port 6 alsó 2 bitje = az aktuális grafikus mód (0 = GR2, 1 = GR4, 2 = GR16). A hang ugyanazon a
+               porton megy ki, ezért ezt minden mintánál vele együtt írjuk. Alapérték: 2 (GRAPHICS16).
+     SidForras a SidPalettaMasol paramétere (a paletta forráscíme).
+     SidFlag   a hang-IT 1-re állítja minden 100. megszakításnál (= 50 Hz, egy C64-es képkocka); a SidKepkocka törli.
+
+   BELÉPÉSI PONTOK
+     SidPalettaMasol(cím)  a paletta a $F000-ra
+     SidInit()             táblák + a dekódoló alaphelyzete a $2300-as dalból (hang még nincs)
+     SidStart()            IT a $38-ra, hang-IT be (5008 Hz), lapozás $B0; ettől szól
+     SidKepkocka()         megvárja a SidFlag-et, és dekódol egy képkockát (50/s kell hívni)
+     SidStop()             csend, hang-IT ki, a rendszer IT-je és lapozása vissza
+
+   FELTÉTELEK LEJÁTSZÁS ALATT (SidStart..SidStop)
+     - A hang-IT használja: IX, IY, a második regiszterkészletet (BC' DE' HL') és AF'-et - a főprogram NEM nyúlhat
+       hozzájuk (a TRSE-kódban sem), ROM-hívás sem lehet. A SidStart menti, a SidStop visszaadja őket.
+     - Lapozás: $B0 (U0, U1, U2, U3). Az IT csak a $F000-$FFFF-et olvassa (a 3. lapon U3 kell); a SidKepkocka a dal
+       teljes területét. A képernyő (VID a 2. lapon) csak két SidKepkocka között lapozható be, ha a dal $8000 fölé ér.
+     - A lejátszó kódja, változói és a verem ne essenek a $2300-tól a dal végéig és a $F000-$FFFF tartományba.
+     - Időigény: a hang-IT ~330 T a 624-ből (a CPU ~53%-a), a SidKepkocka ~2-3%.
+     - A CRTC kurzor-IT-jét a SidStart kikapcsolja (R10/R11), a SidStop visszakapcsolja (R10/R11 = 3).
+   ============================================================================================================ */
+
+var
+	SidZaj		:	incbin("resources/sid_zaj.bin");		/* zaj: 256 x 0..15 */
+	SidMod		:	byte = 2;
+	SidForras	:	integer = 0;
+	const DAL_CIM	: integer = $2300;
+	const PALETTA	: integer = $F000;
+
+	/* csak a mintához: egy rövid dal (LN1/1, 1 perc) és a palettája */
+	DemoDal		:	incbin("resources/lejatszo/demo_dal.bin", $2300);
+	DemoPaletta	:	incbin("resources/lejatszo/demo_paletta.bin", $4000);
+
+
+/* ---------------------------------------------------------------- SidPalettaMasol: 3584 byte SidForras -> $F000 (U3) */
+procedure SidPalettaMasol(SidForras : global integer);
+begin
+	asm("
+		di
+		ld	a,$B0
+		out	($02),a
+		ld	hl,(SidForras)
+		ld	de,$F000
+		ld	bc,3584
+		ldir
+		ld	a,($0003)
+		out	($02),a
+		ei
+	");
+end;
+
+
+/* ---------------------------------------------------------------- a lejátszó: init, start, képkocka, stop + a hang-IT */
+procedure SidInit();
+begin
+	asm("
+		di
+		ld	a,$B0
+		out	($02),a
+		call	TablaGen
+		ld	a,($0003)
+		out	($02),a
+		ei
+		;	dekodolo: hangonkent 10 byte (mutato, var, refdb, visszater, lepes, szelet, PW)
+		ld	hl,DkAll
+		ld	b,30
+	SiTorl:
+		ld	(hl),0
+		inc	hl
+		djnz	SiTorl
+		ld	hl,($2300)
+		ld	(DkAll),hl
+		ld	hl,($2302)
+		ld	(DkAll+10),hl
+		ld	hl,($2304)
+		ld	(DkAll+20),hl
+		ld	a,128
+		ld	(DkAll+9),a
+		ld	(DkAll+19),a
+		ld	(DkAll+29),a
+		ld	hl,V1SH
+		call	SidResCsend
+		ld	hl,V2SH
+		call	SidResCsend
+		ld	hl,V3SH
+		call	SidResCsend
+		ld	a,(SidMod)			;	csend: (15 - 0) / 2 x 4 + 2 bit modbit
+		add	a,28
+		ld	(SidOfs+1),a
+		ld	hl,0
+		ld	(V1ST+1),hl
+		ld	(V2ST+1),hl
+		ld	(V3ST+1),hl
+		xor	a
+		ld	(SidFlag),a
+		jp	SidInitVege
+
+	;	------------------------------------------------ SidStart
+	SidStartK:
+		di
+		ld	(SsIX),ix
+		ld	(SsIY),iy
+		exx
+		ld	(SsHL),hl
+		ld	(SsDE),de
+		ld	(SsBC),bc
+		exx
+		ld	a,($0B12)
+		ld	(SsB12),a
+		ld	a,$B0				;	U0,U1,U2,U3
+		ld	($0003),a
+		out	($02),a
+		ld	ix,0
+		ld	iy,0
+		exx
+		ld	hl,0
+		ld	c,100				;	C' = IT-szamlalo a kepkockahoz
+		ld	b,0
+		exx
+		ld	hl,$38				;	jp SidIT
+		ld	(hl),195
+		ld	de,SidIT
+		inc	hl
+		ld	(hl),e
+		inc	hl
+		ld	(hl),d
+		ld	a,10				;	CRTC kurzor-IT ki (R10/R11 bit 5)
+		out	($70),a
+		ld	a,3+32
+		out	($71),a
+		ld	a,11
+		out	($70),a
+		ld	a,3+32
+		out	($71),a
+		ld	a,$D9				;	hangoszto $FD9: 16 x 39 = 624 T = 5008 Hz
+		out	($04),a
+		ld	a,($0B12)
+		and	128+64
+		or	15
+		out	($05),a
+		or	32					;	hang-IT be
+		ld	($0B12),a
+		out	($05),a
+		out	($07),a
+		im	1
+		ei
+		ret
+
+	;	------------------------------------------------ SidKepkocka
+	SidKepK:
+		ld	a,(SidFlag)
+		or	a
+		jr	z,SidKepK
+		xor	a
+		ld	(SidFlag),a
+		ld	(DkSzum),a
+		ld	hl,DkAll
+		ld	de,Res
+		call	DkHang
+		ld	hl,DkAll+10
+		ld	de,Res+10
+		call	DkHang
+		ld	hl,DkAll+20
+		ld	de,Res+20
+		call	DkHang
+		ld	a,(DkSzum)			;	DC-kiegyenlites: (15 - szintek) / 2 x 4 + modbit
+		cpl
+		add	a,16
+		and	$FE
+		add	a,a
+		ld	hl,SidMod
+		add	a,(hl)
+		ld	(DkSzum),a
+		;	a resek atirasa hangonkent kulon di/ei (egyben tobb lenne a 624 T-s IT-koznel: elveszne egy IT)
+		ld	hl,Res
+		di
+		ld	de,V1SH
+		ld	bc,10
+		ldir
+		ld	de,(DkAll+6)
+		ld	(V1ST+1),de
+		ei
+		nop						;	ei utan egy utasitas kell, kulonben a ket di-szakasz osszeer
+		di
+		ld	de,V2SH
+		ld	bc,10
+		ldir
+		ld	de,(DkAll+16)
+		ld	(V2ST+1),de
+		ei
+		nop
+		di
+		ld	de,V3SH
+		ld	bc,10
+		ldir
+		ld	de,(DkAll+26)
+		ld	(V3ST+1),de
+		ld	a,(DkSzum)
+		ld	(SidOfs+1),a
+		ei
+		ret
+
+	;	------------------------------------------------ SidStop
+	SidStopK:
+		di
+		ld	hl,$38				;	a rendszer IT-je: push af / ld a,$70 ...
+		ld	(hl),$F5
+		inc	hl
+		ld	(hl),$3E
+		inc	hl
+		ld	(hl),$70
+		ld	a,(SidMod)			;	hangero 0, a modbit marad
+		out	($06),a
+		ld	a,(SsB12)
+		and	$CF				;	hang es hang-IT ki
+		ld	($0B12),a
+		out	($05),a
+		ld	a,10				;	kurzor-IT vissza
+		out	($70),a
+		ld	a,3
+		out	($71),a
+		ld	a,11
+		out	($70),a
+		ld	a,3
+		out	($71),a
+		ld	a,$70
+		ld	($0003),a
+		out	($02),a
+		ld	ix,(SsIX)
+		ld	iy,(SsIY)
+		exx
+		ld	hl,(SsHL)
+		ld	de,(SsDE)
+		ld	bc,(SsBC)
+		exx
+		ei
+		ret
+
+	SsIX:
+		dw	0
+	SsIY:
+		dw	0
+	SsHL:
+		dw	0
+	SsDE:
+		dw	0
+	SsBC:
+		dw	0
+	SsB12:
+		db	0
+
+	;	------------------------------------------------ dekodolo: egy hang egy kepkockaja
+	;	HL = a hang allapota (10 byte), DE = a hang res-kepe (10 byte)
+	DkHang:
+		push	hl
+		push	de
+		ld	de,DkM
+		ld	bc,10
+		ldir
+		call	DkLep
+		pop	de
+		;	szelet: felso 4 bit = tabla (0..13 paletta, 14 zaj, 15 negyszog), also 4 bit = szint
+		ld	a,(DkM+8)
+		ld	c,a
+		and	15
+		ld	b,a
+		ld	hl,DkSzum
+		add	a,(hl)
+		ld	(hl),a
+		ld	a,c
+		ld	hl,KepCsend
+		cp	$F0
+		jr	c,DkT
+		ld	hl,KepNegy
+	DkT:
+		push	de
+		push	bc
+		ld	bc,10
+		ldir
+		pop	bc
+		pop	hl
+		inc	hl
+		ld	a,c
+		cp	$F0
+		jr	nc,DkN
+		rrca
+		rrca
+		rrca
+		rrca
+		or	$F0					;	lap = $F0 + tabla
+		inc	hl
+		ld	(hl),a
+		inc	hl
+		inc	hl
+		inc	hl
+		ld	(hl),b				;	or szint
+		jr	DkVissza
+	DkN:
+		ld	a,(DkM+9)
+		ld	(hl),a				;	cp PW
+		inc	hl
+		inc	hl
+		inc	hl
+		ld	a,b
+		add	a,a
+		add	a,a
+		ld	(hl),a				;	and szint x 4
+	DkVissza:
+		pop	de
+		ld	hl,DkM
+		ld	bc,10
+		ldir
+		ret
+	;	a res ket kepe: ld e,a / ld d,$F0+t / ld a,(de) / or szint / ld e,a / ld d,$FF / ld a,(de)
+	;	ill. cp PW / sbc a,a / and szint x 4 / jr +3
+	KepCsend:
+		db	$5F,$16,$F0,$1A,$F6,$00,$5F,$16,$FF,$1A
+	KepNegy:
+		db	$FE,$00,$9F,$E6,$00,$18,$03,$00,$00,$00
+	DkSzum:
+		db	0
+	;	+0 mutato, +2 var, +3 refdb, +4 visszateres, +6 lepes, +8 szelet, +9 PW
+	DkM:
+		db	0,0,0,0,0,0,0,0,0,0
+	DkAll:
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	Res:
+		db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+
+	;	rekord: $00..$0F = bit 0 lepes (2 byte), bit 1 lepes += elojeles byte, bit 2 szelet, bit 3 PW;
+	;	$80+n = n kepkocka valtozas nelkul; $10 lo hi n = REF (n rekord onnan); $11 lo hi = ugras (hurok)
+	DkLep:
+		ld	a,(DkM+2)
+		or	a
+		jr	z,DkOlvas
+		dec	a
+		ld	(DkM+2),a
+		ret
+	DkOlvas:
+		ld	hl,(DkM)
+	DkKod:
+		ld	a,(hl)
+		cp	$10
+		jr	nz,DkNem10
+		inc	hl
+		ld	e,(hl)
+		inc	hl
+		ld	d,(hl)
+		inc	hl
+		ld	a,(hl)
+		ld	(DkM+3),a
+		inc	hl
+		ld	(DkM+4),hl
+		ex	de,hl
+		jr	DkKod
+	DkNem10:
+		cp	$11
+		jr	nz,DkNem11
+		inc	hl
+		ld	e,(hl)
+		inc	hl
+		ld	d,(hl)
+		ex	de,hl
+		jr	DkKod
+	DkNem11:
+		inc	hl
+		bit	7,a
+		jr	z,DkRek
+		and	$7F
+		dec	a
+		ld	(DkM+2),a
+		jr	DkVeg
+	DkRek:
+		ld	c,a
+		bit	0,c
+		jr	z,DkR1
+		ld	e,(hl)
+		inc	hl
+		ld	d,(hl)
+		inc	hl
+		ld	(DkM+6),de
+	DkR1:
+		bit	1,c
+		jr	z,DkR2
+		ld	a,(hl)
+		inc	hl
+		ld	e,a
+		rla
+		sbc	a,a
+		ld	d,a
+		push	hl
+		ld	hl,(DkM+6)
+		add	hl,de
+		ld	(DkM+6),hl
+		pop	hl
+	DkR2:
+		bit	2,c
+		jr	z,DkR3
+		ld	a,(hl)
+		inc	hl
+		ld	(DkM+8),a
+	DkR3:
+		bit	3,c
+		jr	z,DkVeg
+		ld	a,(hl)
+		inc	hl
+		ld	(DkM+9),a
+	DkVeg:
+		ld	a,(DkM+3)
+		or	a
+		jr	z,DkTarol
+		dec	a
+		ld	(DkM+3),a
+		jr	nz,DkTarol
+		ld	hl,(DkM+4)
+	DkTarol:
+		ld	(DkM),hl
+		ret
+
+	;	------------------------------------------------ tablak ($B0 lapozasban): $FE00 zaj x 16, $FF00 szintlap
+	;	szintlap [ertek x 16 + szint] = (ertek x szint + 7) / 15 x 4
+	TablaGen:
+		ld	hl,$FE00
+		ld	de,SidZaj
+	TgZaj:
+		ld	a,(de)
+		add	a,a
+		add	a,a
+		add	a,a
+		add	a,a
+		ld	(hl),a
+		inc	de
+		inc	l
+		jr	nz,TgZaj
+		inc	h
+	TgSz:
+		ld	a,l
+		and	15
+		ld	c,a
+		ld	a,l
+		rrca
+		rrca
+		rrca
+		rrca
+		and	15
+		ld	b,a
+		inc	b
+		ld	a,7
+	TgMul:
+		dec	b
+		jr	z,TgOszt
+		add	a,c
+		jr	TgMul
+	TgOszt:
+		ld	b,0
+	TgO1:
+		sub	15
+		jr	c,TgO2
+		inc	b
+		jr	TgO1
+	TgO2:
+		ld	a,b
+		add	a,a
+		add	a,a
+		ld	(hl),a
+		inc	l
+		jr	nz,TgSz
+		ret
+
+	SidResCsend:				;	HL = a res: csend (0. tabla, szint 0)
+		ex	de,hl
+		ld	hl,KepCsend
+		ld	bc,10
+		ldir
+		ret
+
+	SidFlag:
+		db	0
+
+	;	------------------------------------------------ A HANG-IT (5008 Hz)
+	;	hangonkent: fazis += lepes (IX, IY, HL'), a felso byte a tabla indexe; a 10 byte-os res a DkHang irja
+	SidIT:
+		ex	af,af'
+		exx
+		out	($07),a				;	IT nyugtazas
+	V1ST:
+		ld	de,0
+		add	ix,de
+		ld	a,ixh
+	V1SH:
+		db	$5F,$16,$F0,$1A,$F6,$00,$5F,$16,$FF,$1A
+		ld	b,a
+	V2ST:
+		ld	de,0
+		add	iy,de
+		ld	a,iyh
+	V2SH:
+		db	$5F,$16,$F0,$1A,$F6,$00,$5F,$16,$FF,$1A
+		add	a,b
+		ld	b,a
+	V3ST:
+		ld	de,0
+		add	hl,de
+		ld	a,h
+	V3SH:
+		db	$5F,$16,$F0,$1A,$F6,$00,$5F,$16,$FF,$1A
+		add	a,b
+	SidOfs:
+		add	a,30				;	DC-kiegyenlites + modbit (a SidKepkocka irja)
+		out	($06),a
+		dec	c
+		jr	z,SidKep
+	SidVege:
+		exx
+		ex	af,af'
+		ei
+		ret
+	SidKep:
+		ld	c,100
+		ld	a,1
+		ld	(SidFlag),a
+		jr	SidVege
+
+	SidInitVege:
+	");
+end;
+
+
+procedure SidStart();
+begin
+	asm("	call	SidStartK");
+end;
+
+
+procedure SidKepkocka();
+begin
+	asm("	call	SidKepK");
+end;
+
+
+procedure SidStop();
+begin
+	asm("	call	SidStopK");
+end;
+
+
+/* ---------------------------------------------------------------- MINTA (törölhető): a dal szól, bármely gomb = vége.
+   A lejátszás alatti hurok asm-ben van, mert a TRSE-kód használhatja az IX/IY-t. */
+begin
+	SidMod := 1;				/* BASIC után GRAPHICS 4 */
+	SidPalettaMasol(#DemoPaletta);
+	SidInit();
+	SidStart();
+	asm("
+	MiElenged:					;	a betolto RETURN-je
+		call	MiBill
+		jr	nz,MiElenged
+	MiKor:
+		call	SidKepK
+		call	MiBill
+		jr	z,MiKor
+		jr	MiKi
+	MiBill:						;	Z = nincs lenyomott gomb (billentyuzet-sorok 0..9: port 3, $58)
+		ld	a,($0B11)
+		and	$F0
+		ld	b,10
+	MiSor:
+		out	($03),a
+		ld	c,a
+		in	a,($58)
+		inc	a
+		ret	nz
+		ld	a,c
+		inc	a
+		djnz	MiSor
+		xor	a
+		ret
+	MiKi:
+	");
+	SidStop();
+	asm("
+	MiVegtelen:
+		jr	MiVegtelen
+	");
+end.

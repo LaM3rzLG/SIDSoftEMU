@@ -131,6 +131,13 @@ Betöltés: csak a név (mint a NanoSD-nél); a .STC nem .cas, ezért a kártya 
 (`SorRajz`). Mérve: 80 ms/lépés (régen a teljes `ListaRajz` ~450 ms). **A VID-be mentett rész most 13 270 B (a határ 13 312:
 csak 42 B tartalék!)** - új kódnál előbb helyet kell csinálni.
 
+## Önálló lejátszó (2026-11-04, freeTVC-ben kipróbálva; a felhasználó kérése: másik fejlesztőnek, beépítéshez)
+`SIDLejatszo.ras` (+ `.trse`, `resources/build_lejatszo_mac.sh`, lemez: `load"SIDLEJ"`): csak a lejátszó, fájlkezelés,
+százalék-kijelző és keret-sáv nélkül. Belépési pontok: `SidPalettaMasol(cím)`, `SidInit`, `SidStart`, `SidKepkocka`
+(vár a SidFlag-re), `SidStop`; paraméter `SidMod` (port 6 módbitjei). Dal kötötten $2300 (a sid2tvc SONG_BASE), paletta
+$F000. A végén egy törölhető minta (LN1/1, 1 perc: `resources/lejatszo/demo_*.bin`). `tools/stc2bin.py`: .STC -> _dal.bin +
+_paletta.bin. Mérve: a burkoló a sid2tvc WAV-jával 0,72-0,88 korreláció, nincs csúszás.
+
 ## Kilépés (2026-11-01, freeTVC headless-ben kipróbálva)
 ESC a gyökérben -> `Kilepes`: doboz középen „Biztosan kilépsz?” I/N (a felhasználó kérése). N vagy ESC (nincs kiírva) = `Rajz()`. I = elengedésre
 vár, `GE::EnableTVCITHandler`, $70 lapozás, a BASIC IX/IY/második regiszterkészlete vissza (`IndMent` a főprogram elején:
