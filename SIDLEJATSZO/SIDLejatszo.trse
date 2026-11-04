@@ -72,6 +72,6 @@ exomizer_toggle = 0
 use_track_19 = 1
 open_files = ,SIDLejatszo.ras
 current_file = SIDLejatszo.ras
-project_path = C:/TVC/TRSE_Projects/SIDSoftEMU/
+project_path = 
 use_python = 0
 image_editor_loc = 0

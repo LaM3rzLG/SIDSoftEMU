@@ -1,7 +1,7 @@
 # SIDSoftEMU — projekt-memória (CLAUDE.md, indulás: 2026-10-30)
 
 Rövid, minden munkamenet elején betöltődik. Érdemi változás után frissítsd röviden.
-**Git: https://github.com/LaM3rzLG/SIDSoftEMU (privát).**
+**Git: https://github.com/LaM3rzLG/SIDSoftEMU (NYILVÁNOS 2026-11-04 óta - ne kerüljön bele jelszó, ROM-kép).**
 **A felhasználó NEM gitel: a pull/commit/push mindig a Claude dolga, a felhasználót soha ne kérd git-parancsra.**
 **KÉT GÉP, KÖZÖS MUNKATERÜLET:** Windows 11 (WinTVC) és Mac (ep128emu); részletek a **tvc-trse** skill
 "Two machines, one shared workspace" részében.
@@ -132,7 +132,9 @@ Betöltés: csak a név (mint a NanoSD-nél); a .STC nem .cas, ezért a kártya 
 csak 42 B tartalék!)** - új kódnál előbb helyet kell csinálni.
 
 ## Önálló lejátszó (2026-11-04, freeTVC-ben kipróbálva; a felhasználó kérése: másik fejlesztőnek, beépítéshez)
-`SIDLejatszo.ras` (+ `.trse`, `resources/build_lejatszo_mac.sh`, lemez: `load"SIDLEJ"`): csak a lejátszó, fájlkezelés,
+**2026-11-04: a repó NYILVÁNOS (a felhasználó döntése); a lejátszó a `SIDLEJATSZO/` mappában** (önálló: .ras, .trse,
+sid_zaj.bin, minta-adat, tools/stc2bin.py, README, kész .cas/.dsk; build: `bash resources/build_lejatszo_mac.sh`).
+`SIDLejatszo.ras` (lemez: `load"SIDLEJ"`): csak a lejátszó, fájlkezelés,
 százalék-kijelző és keret-sáv nélkül. Belépési pontok: `SidPalettaMasol(cím)`, `SidInit`, `SidStart`, `SidKepkocka`
 (vár a SidFlag-re), `SidStop`; paraméter `SidMod` (port 6 módbitjei). Dal kötötten $2300 (a sid2tvc SONG_BASE), paletta
 $F000. A végén egy törölhető minta (LN1/1, 1 perc: `resources/lejatszo/demo_*.bin`). `tools/stc2bin.py`: .STC -> _dal.bin +
