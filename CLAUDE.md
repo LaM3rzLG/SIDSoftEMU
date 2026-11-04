@@ -105,6 +105,14 @@ R14/R15 = $0EFF. **Tanulság:** a főciklus di/ei szakasza < 624 T kell (külön
 lassabb volt), és `ei` után legalább egy utasítás a `di` előtt (`ei / di` egymás után = egyetlen tiltott szakasz).
 Mérés: MCP `run {until: SidKep}` + `machine_info` beam, ill. `trace`.
 
+## VT-DOS 1.1 javítás (2026-11-04, freeTVC-ben kipróbálva: lista, könyvtárváltás, LN1/1 szól, vissza a listába)
+Hibajelentés: HBF-kártyán (freeTVC alap EPROM = VT-DOS 1.1, `hbf.rom`) „(Üres) hiba: 255”. Ok: a kártya fejlécében 1.1-ben
+11 függvény ($D0..$DA), a FISH ($DB) nincs -> A = $FF. A belső diszpécser viszont bájtra azonos (1.2 `$CD46` = 1.1 `$CD3F`,
+függvénytábla `$CD9C`/`$CD95`, a 04H/05H keresés mindkettőben `$E0A8`/`$E0B7`). `FishHivas`: ha 255, `DkKeres` (foglalat a
+"MOPS",4,"DISK" fejléccel + az 1.1-es kód aláírása), és onnan `DkMod` = 1: port 3 = foglalat, $F0 lapozás, `call $C73A`
+(kártya-IT be), IX/HL/DE/BC az FPB-ből, A = kód, `call $CD3F`, `call $C760` (vissza). $F0-nál a kártyából csak $C000-$DFFF
+látszik (fölötte az EXT ROM). Más (ismeretlen) ROM-nál marad a 255. Valódi gépen még nincs kipróbálva.
+
 ## Kilépés (2026-11-01, freeTVC headless-ben kipróbálva)
 ESC a gyökérben -> `Kilepes`: doboz középen „Biztosan kilépsz?” I/N (a felhasználó kérése). N vagy ESC (nincs kiírva) = `Rajz()`. I = elengedésre
 vár, `GE::EnableTVCITHandler`, $70 lapozás, a BASIC IX/IY/második regiszterkészlete vissza (`IndMent` a főprogram elején:

@@ -61,6 +61,7 @@ var
 
 	UtHossz, NevHossz, Db, Sel, Top, Regi, HibaKod	:	byte;
 	FishKod, FishHiba	:	byte;
+	DkMod, DkSlot	:	byte = 0;	/* VT-DOS 1.1 kozvetlen FISH: 0 = meg nem neztuk, 1 = igen (DkSlot = foglalat << 6), 2 = nem */
 	Gomb, ElozoGomb, Ismetles	:	byte;
 	i, j, k, b, y, Elso	:	byte;
 	p			:	^byte;
@@ -1175,9 +1176,14 @@ begin
 end;
 
 
-/* ---------------------------------------------------------------- az egyetlen asm: FISH-hivas
+/* ---------------------------------------------------------------- FISH-hivas
    C = FishKod (04H elso / 05H kovetkezo keresese), DE -> FPB {IX = 0, HL = ut, DE = MintaFcb, BC = TalaltFcb};
-   eredmeny: FishHiba (0 = van bejegyzes). A hivas a $70-es lapozassal megy (mint a SIDSoftEMU-ban). */
+   eredmeny: FishHiba (0 = van bejegyzes). A hivas a $70-es lapozassal megy.
+   VT-DOS 1.1 (HBF-kartya, hbf.rom): a FISH ($DB) nincs benne (a fejlecben 11 fuggveny, $D0..$DA -> A = $FF), de a
+   belso diszpecser (az 1.2-ben a $C703-as FISH-belepo hivja: $CD46) bajtra ugyanaz, 7 byte-tal elobb: $CD3F; a 04H/05H
+   keresesek ugyanott ($E0A8/$E0B7). Ilyenkor (DkMod = 1) a FISH-belepot mi jatsszuk el: a kartya foglalata a 3-as
+   porton, $F0 lapozas (lap 3 = a kartya), $C73A (a kartya IT-je be), IX/HL/DE/BC az FPB-bol, A = kod, call $CD3F,
+   $C760 (vissza). DkKeres: a "MOPS",4,"DISK" fejlecu kartya, es az 1.1-es kod alairasa (mas ROM-nal marad a 255). */
 procedure FishHivas();
 begin
 	asm("
@@ -1196,17 +1202,131 @@ begin
 		ld	a,$70
 		ld	($0003),a
 		out	($02),a
+		ld	a,(DkMod)
+		cp	1
+		jr	z,FhDirekt
 		ld	a,(FishKod)
 		ld	c,a
 		ld	de,Fpb
 		rst	$30
 		db	$DB
 		ld	(FishHiba),a
+		inc	a
+		jr	nz,FhVege			;	nem $FF: kesz
+		ld	a,(DkMod)
+		or	a
+		jr	nz,FhVege			;	mar megneztuk: nem 1.1
+		call	DkKeres
+		ld	a,(DkMod)
+		cp	1
+		jr	nz,FhVege
+	FhDirekt:
+		di
+		ld	a,($0B11)			;	a 3-as port arnyeka
+		push	af
+		and	$3F
+		ld	b,a
+		ld	a,(DkSlot)			;	a foglalat a 6-7. biten
+		or	b
+		ld	($0B11),a
+		out	($03),a
+		ld	a,$F0				;	lap 3 = a kartya
+		ld	($0003),a
+		out	($02),a
+		call	$C73A				;	1.1: $0003 -> $DFFF, IT -> $DB99, ei
+		ld	ix,(Fpb)
+		ld	hl,(Fpb+2)
+		ld	de,(Fpb+4)
+		ld	bc,(Fpb+6)
+		ld	a,(FishKod)
+		call	$CD3F				;	1.1: a belso diszpecser (A = fuggveny)
+		call	$C760				;	1.1: $0003 <- $DFFF, IT -> rendszer, ei (AF marad)
+		di
+		ld	(FishHiba),a
+		pop	af
+		ld	($0B11),a
+		out	($03),a
+		ld	a,$70
+		ld	($0003),a
+		out	($02),a
+		ei
+	FhVege:
 		pop	af
 		ld	($0003),a
 		out	($02),a
 		pop	iy
 		pop	ix
+		jp	FhKi
+
+	;	DkMod := 1 (es DkSlot), ha valamelyik foglalatban VT-DOS 1.1-es lemezkartya van, kulonben 2
+	DkKeres:
+		di
+		ld	a,2
+		ld	(DkMod),a
+		ld	b,0					;	foglalat
+	DkKov:
+		ld	a,($0B11)
+		and	$3F
+		ld	c,a
+		ld	a,b
+		rrca
+		rrca
+		ld	(DkSlot),a
+		or	c
+		out	($03),a
+		ld	a,$F0
+		out	($02),a
+		ld	hl,DkAlair
+	DkBlokk:
+		ld	e,(hl)				;	cim (0 = vege: minden egyezett)
+		inc	hl
+		ld	d,(hl)
+		inc	hl
+		ld	a,d
+		or	e
+		jr	z,DkMegvan
+		ld	c,(hl)				;	hossz
+		inc	hl
+	DkHas:
+		ld	a,(de)
+		cp	(hl)
+		jr	nz,DkNem
+		inc	hl
+		inc	de
+		dec	c
+		jr	nz,DkHas
+		jr	DkBlokk
+	DkMegvan:
+		ld	a,1
+		ld	(DkMod),a
+		jr	DkVege
+	DkNem:
+		inc	b
+		ld	a,b
+		cp	4
+		jr	nz,DkKov
+	DkVege:
+		ld	a,($0B11)
+		out	($03),a
+		ld	a,$70
+		out	($02),a
+		ei
+		ret
+	DkAlair:
+		dw	$C000
+		db	9,$4D,$4F,$50,$53,4,$44,$49,$53,$4B		;	MOPS,4,DISK
+		dw	$C00D
+		db	1,$0B									;	11 fuggveny (1.1)
+		dw	$CD3F
+		db	6,$FE,$20,$30,$4E,$FE,$0F				;	a belso diszpecser
+		dw	$C73A
+		db	6,$F3,$F5,$E5,$3A,$03,$00				;	IT be
+		dw	$C760
+		db	6,$F3,$F5,$E5,$3A,$FF,$DF				;	IT vissza
+		dw	$CD9D
+		db	4,$A8,$E0,$B7,$E0						;	a fuggvenytablaban a 04H/05H kereses (mint az 1.2-ben)
+		dw	0
+	FhKi:
 	");
 end;
 
