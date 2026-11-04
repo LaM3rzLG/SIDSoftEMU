@@ -113,6 +113,15 @@ függvénytábla `$CD9C`/`$CD95`, a 04H/05H keresés mindkettőben `$E0A8`/`$E0B
 (kártya-IT be), IX/HL/DE/BC az FPB-ből, A = kód, `call $CD3F`, `call $C760` (vissza). $F0-nál a kártyából csak $C000-$DFFF
 látszik (fölötte az EXT ROM). Más (ismeretlen) ROM-nál marad a 255. Valódi gépen még nincs kipróbálva.
 
+## TVC256k++ (2026-11-04, freeTVC-ben kipróbálva: lista, könyvtárváltás, LN1/1 szól, vissza; HBF + 256k++ együtt is)
+Hibajelentés: 233. Ok: a kártya init-je átveszi a kazetta-osztályt (a HBF elől is), és ott a $DB = RENAME. Most `Eszkoz` = 2
+(`CkKeres`: "MOPS",6,"256k++" a foglalatok IOMEM-jében, a NanoSD előtt), `CkOlvas`/`CkHivas`: a kártya ROM-jának saját
+hívásai (forrás: github.com/dikdom/TVC256kplusplus `sources/firmware/TVC-IO/Z80`): `$56` CD (DE = hossz + út, / jelekkel),
+`$D7` OPENDIR, `$D8` READDIR (DE = $6C00, 274 B: Pascal-név, $100 attr ($10 = könyvtár), $101 méret 4 B, $105 rövid név
+hossz + 12 jel - csak ha a név > 12, különben szemét!), `$58` lezárás. A . kezdetű nevek kimaradnak (nincs ..: ESC = feljebb).
+Betöltés: csak a név (mint a NanoSD-nél); a .STC nem .cas, ezért a kártya nem kér CAS-fejlécet. freeTVC: `--card256
+--card256-usb <mappa>`. Kód vége most $3DFB, mentés 13 046 B (a határ 13 312!).
+
 ## Kilépés (2026-11-01, freeTVC headless-ben kipróbálva)
 ESC a gyökérben -> `Kilepes`: doboz középen „Biztosan kilépsz?” I/N (a felhasználó kérése). N vagy ESC (nincs kiírva) = `Rajz()`. I = elengedésre
 vár, `GE::EnableTVCITHandler`, $70 lapozás, a BASIC IX/IY/második regiszterkészlete vissza (`IndMent` a főprogram elején:

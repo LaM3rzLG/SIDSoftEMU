@@ -29,7 +29,7 @@ var
 	InfoVan		:	byte;									/* 1 = 1.1-es .STC: cim, szerzo, kiadas az INFO_CIM-en */
 	const INFO_CIM	: integer = $6F00;						/* 3 x 32 byte (a logo es a lista kozott; nem mentodik) */
 	InfoSor		:	array[34] of byte;						/* SorKi; NanoSD-nel a lista egy bejegyzese (17 byte) is */
-	Eszkoz		:	byte = 0;								/* 0 = lemez (VT-DOS, FISH), 1 = NanoSD */
+	Eszkoz		:	byte = 0;								/* 0 = lemez (VT-DOS, FISH), 1 = NanoSD, 2 = TVC256k++ */
 	NsPort, NsSt, NsKod	:	byte = 0;							/* a NanoSD portja ($10 x (foglalat + 1)), allapot, parancs */
 	PerJel		:	array[2] of byte = (92, 0);				/* "\" (a TRSE-szovegben a \ nem irhato) */
 	/* a font es a forgo logo (maszkolt GE sprite 6 x 17, 16 fazis) FIX cimen, a kod moge ($5000-$6E42): a valtozok kozott
@@ -1759,11 +1759,212 @@ begin
 end;
 
 
+/* ---------------------------------------------------------------- TVC256k++ (dikdom; a kartya ROM-ja: github.com/dikdom/
+   TVC256kplusplus, sources/firmware/TVC-IO/Z80). A kartya init-je a kazetta-osztalyt veszi at (a HBF elol is), ezert ha bent
+   van, a betoltes (CAS_OPEN/BKIN) rajta megy -> a listat is tole kerjuk, a sajat kazetta-osztalyu fuggvenyeivel:
+   $56 = CD (DE = TVC-szoveg: hossz + jelek, / jelekkel), $D7 = OPENDIR (az aktualis konyvtar), $D8 = READDIR (DE = 274 byte:
+   256 byte Pascal-nev, 1 byte attributum ($10 = konyvtar), 4 byte meret, rovid nev hossz + 12 jel - csak ha a nev > 12, kulonben szemet), $58 = a konyvtar
+   lezarasa; A = 0 rendben. (A $DB itt RENAME - ezert adott a FISH 233-at.) A fajlnev a betolteshez a CD-hez kepest. */
+procedure CkKeres();
+begin
+	asm("
+		di
+		ld	b,0					;	foglalat
+	CkKov:
+		ld	a,($0B11)
+		and	$3F
+		ld	c,a
+		ld	a,b
+		rrca
+		rrca
+		or	c
+		out	($03),a
+		ld	a,$D0				;	U0, U1, VID, IOMEM
+		out	($02),a
+		ld	hl,$C004
+		ld	de,CkNev
+		ld	c,7
+	CkHas:
+		ld	a,(de)
+		cp	(hl)
+		jr	nz,CkNem
+		inc	hl
+		inc	de
+		dec	c
+		jr	nz,CkHas
+		ld	a,2					;	megvan
+		ld	(Eszkoz),a
+		jr	CkVege
+	CkNem:
+		inc	b
+		ld	a,b
+		cp	4
+		jr	nz,CkKov
+	CkVege:
+		ld	a,($0B11)
+		out	($03),a
+		ld	a,($0003)
+		out	($02),a
+		ei
+		jr	CkKi
+	CkNev:
+		db	6,$32,$35,$36,$6B,$2B,$2B		;	6, 256k++
+	CkKi:
+	");
+end;
+
+
+/* NsKod = a kartya fuggvenye ($56, $D7, $D8, $58), DE = FkFajl ($56) / $6C00 ($D8); eredmeny NsSt (0 = rendben).
+   READDIR utan a bejegyzes az InfoSor-ba: 0..12 = a nev (0-val zarva; > 12 jelnel a rovid nev), 13 = attributum, 14..17 = meret. */
+procedure CkHivas();
+begin
+	asm("
+		push	ix
+		push	iy
+		ld	a,(NsKod)
+		ld	(CkRst+1),a
+		ld	a,($0003)
+		push	af
+		ld	a,$70
+		ld	($0003),a
+		out	($02),a
+		ld	de,FkFajl
+		ld	a,(NsKod)
+		cp	$D8
+		jr	nz,CkRst
+		ld	de,$6C00
+	CkRst:
+		rst	$30
+		db	0
+		ld	(NsSt),a
+		pop	af
+		ld	($0003),a
+		out	($02),a
+		pop	iy
+		pop	ix
+		ld	a,(NsKod)
+		cp	$D8
+		jr	nz,CkKesz
+		ld	a,(NsSt)
+		or	a
+		jr	nz,CkKesz
+		ld	hl,$6C00			;	a Pascal-nev (hossz + jelek)
+		ld	a,(hl)
+		cp	13
+		jr	c,CkNevOk
+		ld	hl,$6D05			;	> 12 jel: a rovid nev ($6C00 + 261, szinten hossz + jelek)
+	CkNevOk:
+		ld	b,(hl)
+		inc	hl
+		ld	de,InfoSor
+		ld	c,12
+	CkHosz:
+		ld	a,b
+		or	a
+		jr	z,CkHvege
+		ld	a,(hl)
+		ld	(de),a
+		inc	hl
+		inc	de
+		dec	b
+		dec	c
+		jr	nz,CkHosz
+	CkHvege:
+		xor	a
+		ld	(de),a
+	CkAttr:
+		ld	hl,$6D00			;	attributum + meret ($6C00 + 256)
+		ld	de,InfoSor+13
+		ld	bc,5
+		ldir
+	CkKesz:
+	");
+end;
+
+
+/* a konyvtar beolvasasa a TVC256k++-rol -> Lista, Db (CD az Ut-ra, / jelekkel; OPENDIR, READDIR...; a . kezdetuek kimaradnak) */
+procedure CkOlvas();
+begin
+	Db := 0;
+	j := 0;
+	while (j < UtHossz) do
+	begin
+		b := Ut[j];
+		if (b = 92) then b := 47;
+		FkFajl[j + 1] := b;
+		j := j + 1;
+	end;
+	FkFajl[0] := UtHossz;
+	GE::EnableTVCITHandler();
+	NsKod := $56;
+	CkHivas();
+	if (NsSt = 0) then
+	begin
+		NsKod := $D7;
+		CkHivas();
+	end;
+	if (NsSt <> 0) then
+	begin
+		HibaKod := NsSt;
+		LogoITBe();
+		return;
+	end;
+	NsKod := $D8;
+	CkHivas();
+	while ((NsSt = 0) and (InfoSor[0] <> 0)) do
+	begin
+		if (InfoSor[0] <> 46) then
+		begin
+			BejCim(Db);
+			/* "nev.kit" -> NEV 8 + KIT 3, szokozzel, nagybetuvel */
+			k := 0;
+			i := 0;
+			while (k < 8) do
+			begin
+				b := InfoSor[i];
+				if ((b = 46) or (b = 0)) then b := 32
+				else i := i + 1;
+				if (b >= 97) then
+					if (b <= 122) then b := b - 32;
+				p[k] := b;
+				k := k + 1;
+			end;
+			while ((InfoSor[i] <> 46) and (InfoSor[i] <> 0)) do i := i + 1;
+			if (InfoSor[i] = 46) then i := i + 1;
+			while (k < 11) do
+			begin
+				b := InfoSor[i];
+				if (b = 0) then b := 32
+				else i := i + 1;
+				if (b >= 97) then
+					if (b <= 122) then b := b - 32;
+				p[k] := b;
+				k := k + 1;
+			end;
+			p[11] := InfoSor[13];
+			p[12] := InfoSor[14];
+			p[13] := InfoSor[15];
+			p[14] := InfoSor[16];
+			p[15] := InfoSor[17];
+			Db := Db + 1;
+		end;
+		if (Db = 255) then InfoSor[0] := 0
+		else CkHivas();
+	end;
+	HibaKod := NsSt;
+	NsKod := $58;				/* a konyvtar lezarasa */
+	CkHivas();
+	LogoITBe();
+end;
+
+
 /* ---------------------------------------------------------------- konyvtar beolvasasa: NanoSD vagy lemez */
 procedure Olvas();
 begin
 	if (Eszkoz = 1) then
 		NsOlvas()
+	else if (Eszkoz = 2) then
+		CkOlvas()
 	else
 		FishOlvas();
 	if (Sel >= Db) then
@@ -1982,7 +2183,7 @@ procedure Jatszik();
 begin
 	k := 1;
 	j := 0;
-	if (Eszkoz = 1) then j := 255;	/* NanoSD: csak a nev (az aktualis konyvtar a CHDIR-bol) */
+	if (Eszkoz <> 0) then j := 255;	/* NanoSD, TVC256k++: csak a nev (az aktualis konyvtar a CHDIR/CD-bol) */
 	while (j < UtHossz) do
 	begin
 		FkFajl[k] := Ut[j];
@@ -2550,8 +2751,12 @@ begin
 	Ut[1] := 0;
 	UtHossz := 1;
 	GE::ClearScreen(GE::GR16_COLOR_BLACK);
-	NsKeres();
-	if (NsPort <> 0) then Eszkoz := 1;
+	CkKeres();						/* TVC256k++ -> Eszkoz = 2 (a kazetta-osztaly az ove) */
+	if (Eszkoz = 0) then
+	begin
+		NsKeres();
+		if (NsPort <> 0) then Eszkoz := 1;
+	end;
 	LogoIndit();
 	UjKonyvtar();
 
