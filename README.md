@@ -17,7 +17,11 @@ Ez a fejlesztés forrása (TRSE / Z80, C, Python).
 | `sid/`, `sid_tvc/` | a Last Ninja 1–2 zenéi (`.sid` a HVSC-ből) és átalakítva |
 | `docs/` | a kezdeti kutatás és terv |
 
-A zenék szerzői jogai a szerzőké és a kiadóé.
+## Licenc
+
+**MIT** ([LICENSE](LICENSE)): szabadon használható, módosítható és beépíthető bármilyen programba. Kivételek:
+`tools/sid2tvc/` GPL-3.0-or-later; `tvc_units/` a TRSE és a GE unit (Bertók Zsolt) saját licence szerint; a zenék
+(`sid/`, `sid_tvc/`) szerzői jogai a szerzőké és a kiadóé.
 
 ---
 L@M3rZ (LaM3rzLG), 2026.

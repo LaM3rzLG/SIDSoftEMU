@@ -3,6 +3,7 @@ program SIDLejatszo;
 /* ============================================================================================================
    SIDLejatszo - a SIDSoftEMU lejátszója önállóan (fájlkezelés nélkül), Videoton TV-Computer, TRSE.
    C64-es SID-zene (a PC-s sid2tvc-vel átalakítva) 3 hangon, a TVC 4 bites hangkimenetén (port 6), 5008 Hz-en.
+   L@M3rZ (LaM3rzLG), 2026. Licenc: MIT (szabadon használható és beépíthető, lásd LICENSE).
 
    A ZENEI ADAT (a memóriában kell lennie a SidInit előtt; a sid2tvc .STC fájljából: tools/stc2bin.py)
      DAL_CIM   $2300        a dal (xxx_dal.bin). A dal belső címei abszolútak, ezért a cím KÖTÖTT ($2300 =

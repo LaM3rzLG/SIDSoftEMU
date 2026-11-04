@@ -13,6 +13,7 @@ kell átalakítani a [`sid2tvc`](https://github.com/LaM3rzLG/TVC-Programok/tree/
 | `resources/sid_zaj.bin` | a zaj-tábla (256 byte), a lejátszó `incbin`-nel beolvassa – **kell** |
 | `resources/lejatszo/demo_dal.bin`, `demo_paletta.bin` | a minta zenéje (Last Ninja 1. dal, 1 perc) – csak a mintához |
 | `tools/stc2bin.py` | átalakító: `.STC` → nyers dal + paletta (Python 3) |
+| `LICENSE` | MIT licenc |
 | `SIDLejatszo.cas`, `SIDLejatszo.dsk` | a lefordított minta: lemezen `LOAD "SIDLEJ"`, bármely gomb leállítja |
 
 ## A zene elkészítése
@@ -61,6 +62,11 @@ Asm-ből ugyanezek: `call SidStartK`, `call SidKepK`, `call SidStopK` (a `SidIni
 
 TRSE-ben nyisd meg a `SIDLejatszo.trse`-t, és fordítsd le (Build). Parancssorból:
 `trse -cli op=project project=SIDLejatszo.trse input_file=SIDLejatszo.ras assemble=yes`.
+
+## Licenc
+
+**MIT** ([LICENSE](LICENSE)): szabadon használható és beépíthető bármilyen programba, a forrását sem kell
+kiadni. A minta zenéje (Last Ninja, Ben Daglish & Anthony Lees, System 3) a szerzőké.
 
 ---
 SIDSoftEMU / SIDLEJATSZO – L@M3rZ (LaM3rzLG), 2026.
