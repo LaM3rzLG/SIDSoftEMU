@@ -21,16 +21,16 @@ ugyanazt adja (így a kimenet is bájtra azonos).
 
 ```
 sid2tvc [-s N | -a] [-b] [-t MP] [-o MAPPA] [-n NÉV] [-w] [-f N] [-m] [-q] fajl.sid|fajl.STC ...
-  -s N      aldal (alapértelmezés: a .sid kezdő dala)
-  -a        az összes aldal
+  -s N      a SID fájlon belüli N. dal (alapértelmezés: a fájlban megjelölt alapdal)
+  -a        a SID fájl összes dala
   -o MAPPA  kimenet: MAPPA/<NÉV>/SONG<n>.STC   (alapértelmezés: SID_TVC)
   -n NÉV    a mappa neve (legfeljebb 8 betű; alapértelmezés: a .sid fájlnevéből)
   -w        WAV-előnézet is, pontosan a TVC hangjával: MAPPA/<NÉV>/SONG<n>.WAV
-  -f N      hurok nélkül legfeljebb N képkocka (50/mp; alapértelmezés 30000 = 10 perc)
-  -m        csak a memória-hurok (a hang ismétlődését nem keresi)
+  -f N      ha nincs ismétlődő szakasz: legfeljebb N képkocka (50/mp; alapértelmezés 30000 = 10 perc)
+  -m        az ismétlődő szakaszt csak a C64 memóriájából keresi (a hangból nem)
   -q        csak a hibákat írja ki
   -b        BIN a SID unithoz (.STC helyett): SONG<n>_TAB.BIN + SONG<n>_DAL.BIN; .STC bemenettel is
-  -t MP     legfeljebb MP másodperc (a hurkos dalokra is), aztán elölről
+  -t MP     legfeljebb MP másodperc (akkor is, ha van ismétlődő szakasz), aztán elölről
 ```
 
 Példa: `sid2tvc -a -w Last_Ninja.sid` → `SID_TVC/LASTNINJ/SONG1.STC ... SONG11.STC` (+ WAV).
@@ -41,14 +41,14 @@ A `SID_TVC` mappát változatlan szerkezetben kell a TVC lemezére / SD-kártyá
 
 - **6502-emuláció** a hivatalos és a stabil illegális utasításokkal; PSID és RSID; `play = 0` esetén az
   init által beállított IRQ-rutin ($0314 vagy $FFFE) fut képkockánként.
-- **Hurok, két módszerrel** (a TVC-n a dal a hurokponttól ismétlődik):
+- **Az ismétlődő szakasz, két módszerrel** (a TVC-n a dal a végén az ismétlődő szakasz elejéről folytatódik):
   1. *memória:* a teljes C64-memória (+ SID-regiszterek) első pontos ismétlődése - biztos, de sok lejátszó
      közben számlálót léptet, így gyakran nem talál (vagy csak későn);
   2. *hang:* a hallható TVC-állapot (3 hang: lépésköz, szelet, PW) ismétlődése - a legrövidebb dalt adja
-     (legkisebb hurokpont + hossz). Memória-hurok esetén ez is biztos; ha nincs, a 20 perces mintában legalább
+     (legkorábbi ismétléskezdet + hossz). Ha a memória ismétlődik, ez is biztos; ha nincs, a 20 perces mintában legalább
      2 teljes ismétlés és 30 s egyezés kell hozzá.
-  A kettőből a rövidebb dal nyer (a kiírásban `[memoria]` / `[hang]`). Hurok nélkül 10 perc, aztán elölről;
-  ha a hurok csak 10 perc után jön, és úgy nem fér el, szintén 10 perc.
+  A kettőből a rövidebb dal nyer (a kiírásban `[memoria]` / `[hang]`). Ismétlődő szakasz nélkül 10 perc, aztán elölről;
+  ha az ismétlés csak 10 perc után kezdődik, és úgy nem fér el, szintén 10 perc.
 - **SID-burkoló (ADSR)** a valódi SID-időzítésekkel; hullámforma, impulzusszélesség, hangerő.
 - **Hangszínpaletta (1.2):** a PC hangonként, képkockánként kiszámolja a SID valódi hangjának egy ciklusát (szűrő a
   6581-es görbével, kevert hullámformák, gyűrűmoduláció és szinkron közelítve), és dalonként 14 táblát választ
@@ -72,7 +72,7 @@ képest; a szeletek táblaszáma (felső 4 bit) a használt táblák sorszáma (
 ## A .STC formátum
 
 **1.3 (2026-11-02):** `$FD $FF`, aztán 3 × 32 bájt info a .sid fejlécéből: cím, szerző, kiadás (31 jel + 0; ami a
-TVC-s fontban nincs, az szóköz), 8 bájt a lejátszás-kijelzőhöz (N = képkockák, a hurokpont, a hurokpont százaléka, 0, a
+TVC-s fontban nincs, az szóköz), 8 bájt a lejátszás-kijelzőhöz (N = képkockák, az ismétlés kezdete, annak százaléka, 0, a
 maradék), 14 × 256 bájt paletta (érték × 16; a TVC-n `$F000-$FDFF`), 2 bájt hossz (L), a dal
 `$C000` feletti része, végül a `$2300..$BFFF` rész (így a TVC ROM-jával egyszerűen betölthető). A régi 1.2-es (`$FE $FF`), 1.1-es
 (`$FF $FF` + info) és 1.0-s (rögtön L) fájlt a SIDSoftEMU már nem játssza le („Régi .STC”). A dal `$2300`-tól:
@@ -83,6 +83,6 @@ maradék), 14 × 256 bájt paletta (érték × 16; a TVC-n `$F000-$FDFF`), 2 bá
 | `$00..$0F` | bit 0: lépésköz (2 bájt); bit 1: lépésköz += előjeles bájt; bit 2: szelet (1 bájt: felső 4 bit tábla - 0..13 paletta, 14 zaj, 15 négyszög -, alsó 4 bit szint 0..15); bit 3: PW (1 bájt) |
 | `$80+n` | n képkocka változás nélkül |
 | `$10 lo hi n` | REF: n rekord lejátszása a lo/hi címről |
-| `$11 lo hi` | ugrás (hurok) |
+| `$11 lo hi` | ugrás (az ismétlődő szakasz elejére) |
 
 Licenc: GPL-3.0-or-later.

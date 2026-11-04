@@ -54,7 +54,7 @@
 #define MKDIR(p) mkdir((p), 0755)
 #endif
 
-#define VERZIO "1.4"
+#define VERZIO "1.4.1"
 
 /* ------------------------------------------------------------------ TVC-oldali allandok */
 #define SONG_BASE   0x2300              /* a dal cime a TVC-n */
@@ -1348,7 +1348,7 @@ static int aldal(const SidFajl *s, const char *path, int song, const char *outdi
     char hiba[256] = "", nev[16], mappa[1024], fajl[1100];
     FILE *fo;
     if (!dump(s, song, csak_mem ? maxf : 2 * maxf, &dp, hiba)) {
-        fprintf(stderr, "%s, %d. aldal: %s\n", path, song, hiba);
+        fprintf(stderr, "%s, %d. dal: %s\n", path, song, hiba);
         return 0;
     }
     mem_n = dp.n; mem_loop = dp.loop;
@@ -1394,7 +1394,7 @@ static int aldal(const SidFajl *s, const char *path, int song, const char *outdi
     tvc_nev(path, nev);
     snprintf(mappa, sizeof(mappa), "%s/%s", outdir, nev);
     mkdir_p(mappa);
-    info("%s / %s - %d. aldal: %d kepkocka (%d:%02d), hurok: ", s->name, s->author, song, dp.n,
+    info("%s / %s - %d. dal: %d kepkocka (%d:%02d), ismetles: ", s->name, s->author, song, dp.n,
          dp.n / 50 / 60, dp.n / 50 % 60);
     if (dp.loop >= 0) {
         int P = dp.n - dp.loop;
@@ -1483,18 +1483,18 @@ static void hasznalat(void)
 {
     printf("sid2tvc " VERZIO " - C64 .sid -> TVC: SIDSoftEMU dal (.STC) vagy BIN a SID unithoz (-b)\n"
            "hasznalat: sid2tvc [-s N | -a] [-b] [-t MP] [-o MAPPA] [-n NEV] [-w] [-f N] [-m] [-q] fajl.sid|fajl.STC ...\n"
-           "  kapcsolo nelkul (pl. a .sid fajlt a programra huzva): az osszes aldal, a .sid melle (SID_TVC mappa)\n"
-           "  -s N      aldal (alapertelmezes: a .sid kezdo dala)\n"
-           "  -a        az osszes aldal\n"
+           "  kapcsolo nelkul (pl. a .sid fajlt a programra huzva): a SID fajl osszes dala, a .sid melle (SID_TVC mappa)\n"
+           "  -s N      a SID fajlon beluli N. dal (alapertelmezes: a fajlban megjelolt alapdal)\n"
+           "  -a        a SID fajl osszes dala\n"
            "  -o MAPPA  kimenet: MAPPA/<NEV>/SONG<n>.STC (alapertelmezes: SID_TVC)\n"
            "  -n NEV    a mappa neve (legfeljebb 8 betu; alapertelmezes: a .sid fajlnevebol)\n"
            "  -w        WAV elonezet is (a TVC hangja): MAPPA/<NEV>/SONG<n>.WAV\n"
-           "  -f N      hurok nelkul legfeljebb N kepkocka (50/mp, alapertelmezes 30000 = 10 perc)\n"
-           "  -m        csak a memoria-hurok (a hang ismetlodeset nem keresi)\n"
+           "  -f N      ha nincs ismetlodo szakasz: legfeljebb N kepkocka (50/mp, alapertelmezes 30000 = 10 perc)\n"
+           "  -m        az ismetlest csak a C64 memoriajabol keresi (a hangbol nem)\n"
            "  -q        csak a hibak\n"
            "  -b        BIN a SID unithoz (.STC helyett): SONG<n>_TAB.BIN (a hasznalt tablak, laphatarra) es\n"
            "            SONG<n>_DAL.BIN (a kotta, barhova). .STC bemenettel is: SONG1.STC -> SONG1_TAB.BIN, SONG1_DAL.BIN\n"
-           "  -t MP     legfeljebb MP masodperc (a hurkos dalokra is), aztan elolrol - rovidebb, kisebb dal\n");
+           "  -t MP     legfeljebb MP masodperc (akkor is, ha van ismetlodo szakasz), aztan elolrol - kisebb dal\n");
 }
 
 /* Windows: ha a program sajat konzolablakot kapott (dupla kattintas, fajl az ikonra huzva), a vegen megvar,
@@ -1537,13 +1537,13 @@ static int egy_fajl(const char *path, int song, int osszes, const char *outdir, 
         return stc_bin(path);
     }
     if (!sid_olvas(path, &s)) return 0;
-    info("%s: %s, %d aldal (kezdo: %d), load $%04X init $%04X play $%04X\n", path, s.magic, s.songs, s.start,
+    info("%s: %s, %d dal (alapdal: %d), load $%04X init $%04X play $%04X\n", path, s.magic, s.songs, s.start,
          s.load, s.init, s.play);
     if (osszes) {
         for (i = 1; i <= s.songs; i++) if (!aldal(&s, path, i, outdir, maxf, wav)) jo = 0;
     } else {
         if (song == 0) song = s.start ? s.start : 1;
-        if (song < 1 || song > s.songs) { fprintf(stderr, "nincs ilyen aldal: %d (1..%d)\n", song, s.songs); return 0; }
+        if (song < 1 || song > s.songs) { fprintf(stderr, "nincs ilyen dal: %d (1..%d)\n", song, s.songs); return 0; }
         jo = aldal(&s, path, song, outdir, maxf, wav);
     }
     return jo;
