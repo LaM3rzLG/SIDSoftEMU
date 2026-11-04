@@ -25,7 +25,10 @@ Testvérprojektek és minták: `../Ugh`, `../WaterPumpGame`.
   sárga), memória **U0,U1,VID,SYS** (`GE::MEM_VID_ON` = $50). A ROM a $C000-on, a képernyő a $8000-on van, ezért
   a program kódja és adata csak $0000-$7FFF lehet (most $19EF-$1CA3). `GE::Init` kikapcsolja a firmware IT-t;
   ROM-hívás előtt `GE::EnableTVCITHandler()`.
-- Build: Mac `bash resources/build_mac.sh` (Cmd+Shift+B), Windows `resources\build.ps1`; lemezen: `load"SIDSOFT"`.
+- Build: Mac `bash resources/build_mac.sh` (Cmd+Shift+B), Windows `resources\build.ps1`; lemezen: `load"SIDTVC"`.
+  **2026-11-04 óta a program neve SIDTVC.CAS** (lemezen, SD_KARTYA-ban, kiadásban; a felhasználó kérése), egy lemez:
+  **SIDTVC.dsk** = SIDTVC.CAS + a dalok sorrendben, amíg férnek (most LN1 mind + LN2 1-6, 9; a build kiírja, mi maradt ki).
+  A közös build mellette SIDSoftEMU.dsk-t is ír (ugyanaz, az emulátornak). A SIDSOFT2.dsk megszűnt.
   A `sid_tvc/<NÉV>/*.STC` fájlokat mindkét build magától a lemezre teszi (`SID_TVC\<NÉV>\`).
   A váz az Ugh-ból jött (`tvc_units/`, `resources/kozos.ps1`, `make_dsk.ps1`, `.vscode/tasks.json`).
 
